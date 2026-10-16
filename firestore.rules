@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (getUserData().role == 'general_supervisor' ||
+         (request.auth.token.email == "osamaabedy@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isSupervisor() {
+      return isAuthenticated() && (getUserData().role == 'supervisor' || isAdmin());
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && (getUserData().role == 'teacher' || isSupervisor());
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /students_roster/{nationalId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /reading_sessions/{sessionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    match /quiz_results/{resultId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    match /lessons/{lessonId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin() || isTeacher();
+    }
+
+    match /class_sessions/{classKey} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /question_pool/{questionId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /supervisory_visits/{visitId} {
+      allow read: if isAuthenticated();
+      allow create: if isSupervisor();
+      allow update: if isSupervisor() || (isAuthenticated() && resource.data.teacherId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /peer_visits/{visitId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    match /student_assignments/{studentUid} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+  }
+}

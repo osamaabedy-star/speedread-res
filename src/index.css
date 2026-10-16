@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Amiri:wght@400;700&family=Almarai:wght@300;400;700;800&family=Readex+Pro:wght@200;300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Cairo", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --primary: #4361ee;
+  --primary-rgb: 67, 97, 238;
+  --primary-light: #4895ef;
+  --primary-dark: #3f37c9;
+  --accent: #f72585;
+  --bg: #f8fafc;
+  --card-bg: #ffffff;
+  --text: #0f172a;
+  --text-light: #475569;
+  --border: #e2e8f0;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --radius-lg: 32px;
+  --radius-md: 24px;
+  --radius-sm: 16px;
+  --panel: rgba(255, 255, 255, 0.9);
+  --glass: rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="dark"] {
+  --bg: #0b1120;
+  --card-bg: #1e293b;
+  --text: #f1f5f9;
+  --text-light: #94a3b8;
+  --border: #334155;
+  --panel: rgba(30, 41, 59, 0.95);
+  --glass: rgba(30, 41, 59, 0.7);
+}
+
+[data-theme="comfort"] {
+  --bg: #e6d5b8;
+  --card-bg: #fff7ed;
+  --text: #5e4b3c;
+  --text-light: #8b7a6b;
+  --border: #d4b89c;
+  --panel: rgba(250, 240, 230, 0.95);
+  --glass: rgba(250, 240, 230, 0.7);
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg);
+  color: var(--text);
+  direction: rtl;
+  @apply transition-colors duration-300;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.glass-panel {
+  @apply backdrop-blur-md bg-[var(--glass)] border border-[var(--border)];
+}
+
+.neo-card {
+  @apply bg-[var(--card-bg)] border border-[var(--border)] shadow-lg hover:shadow-xl transition-all duration-300;
+}

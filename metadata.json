@@ -1,0 +1,7 @@
+{
+  "name": "مدارس رياض الإبداع - الفصل الذكي",
+  "description": "منصة تعليمية متطورة للقراءة السريعة تدعم العرض على السبورة والتحكم عن بعد في حصص الطلاب.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+ 

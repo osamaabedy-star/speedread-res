@@ -1,0 +1,165 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user-specific settings and profile information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "fullName": { "type": "string" },
+        "phone": { "type": "string" },
+        "grade": { "type": "string" },
+        "section": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "approved": { "type": "boolean" },
+        "needsPasswordChange": { "type": "boolean" },
+        "role": { "type": "string", "enum": ["student", "teacher", "supervisor", "general_supervisor"] },
+        "assignedClasses": { "type": "array", "items": { "type": "string" } },
+        "xp": { "type": "number" },
+        "level": { "type": "number" },
+        "streak": { "type": "number" },
+        "lastActive": { "type": "string", "format": "date-time" },
+        "bestSpeed": { "type": "number" },
+        "badges": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["username", "role"]
+    },
+    "ReadingSession": {
+      "title": "Reading Session",
+      "description": "Records of a single reading session.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "lessonId": { "type": "string" },
+        "lessonTitle": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "speed": { "type": "number" },
+        "errors": { "type": "number" },
+        "duration": { "type": "number" },
+        "wordsRead": { "type": "number" },
+        "totalWords": { "type": "number" },
+        "completed": { "type": "boolean" },
+        "errorWords": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["userId", "lessonId", "date"]
+    },
+    "QuizResult": {
+      "title": "Quiz Result",
+      "description": "Records of a quiz taken after a reading session.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "lessonId": { "type": "string" },
+        "lessonTitle": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "score": { "type": "number" },
+        "correctAnswers": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "teacherSignature": { "type": "string" }
+      },
+      "required": ["userId", "lessonId", "date"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Educational lessons created by teachers or AI.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "grade": { "type": "string" },
+        "semester": { "type": "string" },
+        "authorId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "isAI": { "type": "boolean" },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["multiple", "order"] },
+              "text": { "type": "string" },
+              "options": { "type": "array", "items": { "type": "string" } },
+              "correct": { "type": "number" },
+              "items": { "type": "array", "items": { "type": "string" } },
+              "correctOrder": { "type": "array", "items": { "type": "number" } }
+            }
+          }
+        }
+      },
+      "required": ["title", "content", "grade", "questions"]
+    },
+    "ClassSession": {
+      "title": "Class Session",
+      "properties": {
+        "activeLessonId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "startedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "QuestionPool": {
+      "title": "Question Pool",
+      "properties": {
+        "text": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "correct": { "type": "number" },
+        "lessonId": { "type": "string" },
+        "type": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SupervisoryVisit": {
+      "title": "Supervisory Visit",
+      "properties": {
+        "supervisorId": { "type": "string" },
+        "supervisorName": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" },
+        "rating": { "type": "number" },
+        "teacherSignature": { "type": "string" },
+        "supervisorSignature": { "type": "string" }
+      }
+    },
+    "PeerVisit": {
+      "title": "Peer Visit",
+      "properties": {
+        "visitorId": { "type": "string" },
+        "visitorName": { "type": "string" },
+        "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" },
+        "visitorSignature": { "type": "string" },
+        "hostSignature": { "type": "string" }
+      }
+    },
+    "StudentAssignment": {
+      "title": "Student Assignment",
+      "properties": {
+        "lessonId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "UserProfile" },
+    "/reading_sessions/{sessionId}": { "schema": "ReadingSession" },
+    "/quiz_results/{resultId}": { "schema": "QuizResult" },
+    "/lessons/{lessonId}": { "schema": "Lesson" },
+    "/class_sessions/{classKey}": { "schema": "ClassSession" },
+    "/question_pool/{questionId}": { "schema": "QuestionPool" },
+    "/supervisory_visits/{visitId}": { "schema": "SupervisoryVisit" },
+    "/peer_visits/{visitId}": { "schema": "PeerVisit" },
+    "/student_assignments/{studentUid}": { "schema": "StudentAssignment" },
+    "/students_roster/{nationalId}": { "schema": "object" }
+  }
+}
