@@ -438,11 +438,106 @@ export default function TeacherDashboard() {
     navigate("/whiteboard");
   };
 
-  const handleManualRefresh = () => {
+  const handleManualRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
+    try {
+      // 1. Fetch Students from students_roster in Firestore
+      const rosterSnap = await getDocs(collection(db, "students_roster"));
+      const rosterMap = new Map<string, UserProfile>();
+      rosterSnap.docs.forEach(docSnap => {
+        const d = docSnap.data();
+        const natId = docSnap.id;
+        const fullName = d.fullName || d.name || `طالب (${natId})`;
+        rosterMap.set(natId, {
+          uid: natId,
+          nationalId: natId,
+          fullName: fullName,
+          username: fullName.split(" ")[0] || natId,
+          grade: d.grade || "",
+          section: d.section || "",
+          role: "student",
+          approved: true,
+          createdAt: d.createdAt
+        } as UserProfile);
+      });
+
+      // 2. Fetch Users where role == student in Firestore
+      const usersSnap = await getDocs(query(collection(db, "users"), where("role", "==", "student")));
+      const usersMap = new Map<string, UserProfile>();
+      usersSnap.docs.forEach(docSnap => {
+        usersMap.set(docSnap.id, { uid: docSnap.id, ...docSnap.data() } as UserProfile);
+      });
+
+      // Combine roster and users
+      const mergedMap = new Map<string, UserProfile>();
+      rosterMap.forEach((student, key) => mergedMap.set(key, student));
+      usersMap.forEach((u, key) => {
+        if (mergedMap.has(key)) {
+          mergedMap.set(key, { ...mergedMap.get(key), ...u });
+        } else {
+          let foundByNat = false;
+          if (u.nationalId) {
+            for (const [rKey, rStudent] of mergedMap.entries()) {
+              if (rStudent.nationalId === u.nationalId) {
+                mergedMap.set(rKey, { ...rStudent, ...u });
+                foundByNat = true;
+                break;
+              }
+            }
+          }
+          if (!foundByNat) {
+            mergedMap.set(key, u);
+          }
+        }
+      });
+      const studentList = Array.from(mergedMap.values());
+      studentList.sort((a, b) => (a.fullName || a.username || "").localeCompare(b.fullName || b.username || "", "ar"));
+      setAllStudents(studentList);
+
+      // 3. Fetch custom lessons from Firestore
+      const customLessonsSnap = await getDocs(collection(db, "lessons"));
+      const customLessons = customLessonsSnap.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+        isCustom: true
+      } as Lesson & { isCustom?: boolean }));
+
+      // Load static lessons
+      const files = [
+        "upper_first.json", "upper_second.json",
+        "primary_first.json", "primary_second.json",
+        "lessons_part1.json", "lessons_part2.json", "lessons_part3.json", "lessons_part4.json", "lessons_part5.json",
+        "lessons_1_2_part1.json"
+      ];
+      let staticLoaded: Lesson[] = [];
+      for (const file of files) {
+        try {
+          const res = await fetch(`/${file}`);
+          if (res.ok) {
+            const data: Lesson[] = await res.json();
+            staticLoaded = [...staticLoaded, ...data];
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      const combinedLessons = [...customLessons, ...staticLoaded];
+      const uniqueLessons = Array.from(new Map(combinedLessons.map(l => [l.id, l])).values());
+      setAllLessons(uniqueLessons);
+
+      // 4. Fetch today's reading sessions
+      const today = new Date().toISOString().split("T")[0];
+      const todaySnap = await getDocs(query(
+        collection(db, "reading_sessions"),
+        where("date", ">=", today)
+      ));
+      const completedIds = Array.from(new Set(todaySnap.docs.map(d => d.data().userId as string)));
+      setTodayCompletedStudentIds(completedIds);
+    } catch (error) {
+      console.error("Manual refresh failed:", error);
+    } finally {
       setIsRefreshing(false);
-    }, 600);
+    }
   };
 
   if (loading) {

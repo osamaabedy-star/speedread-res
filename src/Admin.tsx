@@ -1541,12 +1541,9 @@ export default function Admin() {
 
                 {generatedLesson && (
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-8 border-t pt-8 space-y-6">
-                    <div className="bg-[var(--bg)] p-6 rounded-3xl border-2 border-orange-100 relative group">
-                      <h4 className="text-2xl font-black text-[var(--primary)] mb-4">{generatedLesson.title}</h4>
-                      <div className="text-sm leading-relaxed text-[var(--text)] line-clamp-4">{generatedLesson.content}</div>
-                      <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg)] to-transparent flex items-end justify-center pb-4 opacity-0 group-hover:opacity-100 transition-all">
-                        <button onClick={() => alert(generatedLesson.content)} className="bg-white px-4 py-2 rounded-full text-xs font-bold shadow-md border">قراءة النص كاملاً</button>
-                      </div>
+                    <div className="bg-[var(--bg)] p-6 rounded-3xl border-2 border-orange-100 space-y-3">
+                      <h4 className="text-2xl font-black text-[var(--primary)]">{generatedLesson.title}</h4>
+                      <div className="text-sm leading-relaxed text-[var(--text)] whitespace-pre-line max-h-72 overflow-y-auto p-2 bg-white/60 rounded-xl border border-orange-50">{generatedLesson.content}</div>
                     </div>
                     
                     <div className="space-y-3">

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { Lesson, ReaderConfig, ReadingSession } from "./types";
-import { cn, toIndianNumbers, formatTime } from "./utils";
+import { cn, toIndianNumbers, formatTime, isGradeMatch, getGradeLabel, normalizeGrade } from "./utils";
 import { Play, Pause, Square, Plus, Minus, ZoomIn, ZoomOut, ArrowUpDown, Maximize, AlertCircle, CheckCircle, Loader2, Home, HelpCircle, Zap, Clock, BookOpen, Menu, X, Sliders } from "lucide-react";
 import { addDoc, collection, doc, getDoc, query, where, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
@@ -82,6 +82,15 @@ export default function Reader() {
         }
 
         if (found) {
+          // Check if student belongs to this lesson's grade
+          if (profile?.role === "student" && profile?.grade) {
+            if (!isGradeMatch(profile.grade, found.grade)) {
+              alert(`غير مصرح لك بفتح دروس صف دراسي آخر. صفك المسجل هو: ${getGradeLabel(normalizeGrade(profile.grade) || 1)}`);
+              navigate("/");
+              return;
+            }
+          }
+
           setLesson(found);
           setWords(found.content.trim().split(/\s+/));
         } else {
@@ -95,7 +104,7 @@ export default function Reader() {
       }
     };
     loadLesson();
-  }, [navigate, user]);
+  }, [navigate, user, profile]);
 
   const startCountdown = useCallback(() => {
     let count = 3;

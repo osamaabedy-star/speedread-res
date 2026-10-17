@@ -119,3 +119,10 @@ export function normalizeSection(sectionVal: any): string {
 
   return str.replace(/^(فصل|شعبة|الصف|قسم)\s*/i, "").trim() || "أ";
 }
+
+export function isGradeMatch(studentGrade: any, lessonGrade: any): boolean {
+  const sNum = normalizeGrade(studentGrade);
+  const lNum = normalizeGrade(lessonGrade);
+  if (!sNum || !lNum) return true;
+  return sNum === lNum;
+}

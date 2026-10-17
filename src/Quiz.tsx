@@ -4,7 +4,7 @@ import { useAuth } from "./AuthContext";
 import { QuizQuestion, QuizResult, ReadingSession } from "./types";
 import { cn, toIndianNumbers, formatTime } from "./utils";
 import { HelpCircle, ArrowRight, ArrowLeft, CheckCircle, XCircle, Trophy, ThumbsUp, Target, Clock, AlertTriangle, Home, BookOpen, Loader2 } from "lucide-react";
-import { addDoc, collection } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { updateUserStats } from "./stats";
 
@@ -53,8 +53,19 @@ export default function Quiz() {
               }
             }
           }
+
+          // If not in static files, fetch from Firestore custom lessons
+          if (qList.length === 0) {
+            const docSnap = await getDoc(doc(db, "lessons", parsedSession.lessonId));
+            if (docSnap.exists()) {
+              const lessonData = docSnap.data();
+              if (lessonData?.questions && Array.isArray(lessonData.questions) && lessonData.questions.length > 0) {
+                qList = lessonData.questions;
+              }
+            }
+          }
         } catch (e) {
-          console.error("Failed to load fallback questions:", e);
+          console.error("Failed to load lesson questions:", e);
         }
       }
 
@@ -149,7 +160,25 @@ export default function Quiz() {
         </div>
       </div>
 
-      {!submitted ? (
+      {questions.length === 0 ? (
+        <div className="bg-[var(--card-bg)] rounded-[var(--radius-lg)] p-12 border border-[var(--border)] shadow-md text-center space-y-4">
+          <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto">
+            <HelpCircle size={32} />
+          </div>
+          <h3 className="text-xl font-bold text-gray-800">لا توجد أسئلة مخصصة لهذا الدرس حالياً</h3>
+          <p className="text-sm text-gray-500 max-w-md mx-auto leading-relaxed">
+            لضمان دقة قياس الفهم والاستيعاب القرائي، لا يتم عرض أسئلة عامة أو بديلة غير مطابقة لنص الدرس. يمكنك اختيار نص آخر يحتوي على أسئلة فهم مضافة.
+          </p>
+          <div className="pt-4 flex justify-center gap-3">
+            <button 
+              onClick={() => navigate(profile?.role === "teacher" ? "/teacher" : "/")}
+              className="px-6 py-3 bg-[var(--primary)] text-white rounded-full font-bold hover:shadow-lg transition-all"
+            >
+              {profile?.role === "teacher" ? "العودة للوحة المعلم" : "العودة واختيار نص آخر"}
+            </button>
+          </div>
+        </div>
+      ) : !submitted ? (
         <div className="space-y-8">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-bold flex items-center gap-3">

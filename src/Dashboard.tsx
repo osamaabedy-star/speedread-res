@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { Lesson, ReaderConfig, UserProfile } from "./types";
-import { cn, toIndianNumbers } from "./utils";
+import { cn, toIndianNumbers, isGradeMatch, getGradeLabel, normalizeGrade } from "./utils";
 import { motion, AnimatePresence } from "motion/react";
 import { Sliders, Book, Search, Play, Zap, Scroll, BookOpen, Calendar, CalendarCheck, ChevronRight, FileText, Lock, ChartLine, User, Camera, Loader2, Save, X, Trophy, Star, TrendingUp, Flame, Crown, Award } from "lucide-react";
 import { collection, doc, updateDoc, getDocs, orderBy, query, onSnapshot, deleteDoc } from "firebase/firestore";
@@ -151,17 +151,12 @@ export default function Dashboard() {
   }, [profile, user]);
 
   const filteredLessons = lessons.filter(l => {
-    // Robust grade matching (handles both "1" and "الأول الابتدائي")
-    const gradeMap: Record<string, string[]> = {
-      "1": ["الأول", "1"],
-      "2": ["الثاني", "2"],
-      "3": ["الثالث", "3"],
-      "4": ["الرابع", "4"],
-      "5": ["الخامس", "5"],
-      "6": ["السادس", "6"]
-    };
-    
-    const gradeMatch = !grade || (gradeMap[grade] && gradeMap[grade].some(keyword => l.grade.includes(keyword)));
+    // If student, strictly match student's registered grade
+    const effectiveGrade = (profile?.role === "student" && profile?.grade)
+      ? profile.grade
+      : grade;
+
+    const gradeMatch = !effectiveGrade || isGradeMatch(effectiveGrade, l.grade);
     
     // Semester matching: If lesson has no semester field, show it in Semester 1 by default
     const semesterMatch = !l.semester || l.semester === semester || (semester === "الفصل الدراسي الأول" && !l.semester);
@@ -173,6 +168,16 @@ export default function Dashboard() {
 
   const handleLaunch = () => {
     if (!selectedLessonId) return;
+    const selectedLesson = lessons.find(l => l.id === selectedLessonId);
+    
+    // Check grade authorization for students
+    if (profile?.role === "student" && profile?.grade && selectedLesson) {
+      if (!isGradeMatch(profile.grade, selectedLesson.grade)) {
+        alert(`غير مسموح بفتح دروس صف دراسي آخر. صفك المسجل هو: ${getGradeLabel(normalizeGrade(profile.grade) || 1)}`);
+        return;
+      }
+    }
+
     const config: ReaderConfig = {
       lessonId: selectedLessonId,
       speed,
@@ -221,14 +226,19 @@ export default function Dashboard() {
         await updatePassword(user, newPassword);
       }
 
-      // Update Profile in Firestore
-      await updateDoc(doc(db, "users", profile.uid), {
+      // Update Profile in Firestore (students cannot modify their own grade/section)
+      const updatePayload: any = {
         fullName: `${editFirstName} ${editLastName}`.trim(),
-        grade: editGrade,
-        semester: editSemester,
-        section: editSection,
         needsPasswordChange: false // Mark as completed
-      });
+      };
+
+      if (profile.role !== "student") {
+        updatePayload.grade = editGrade;
+        updatePayload.semester = editSemester;
+        updatePayload.section = editSection;
+      }
+
+      await updateDoc(doc(db, "users", profile.uid), updatePayload);
 
       await refreshProfile();
       setShowProfileModal(false);
@@ -265,9 +275,14 @@ export default function Dashboard() {
           </div>
           <button 
             onClick={() => {
-              setSelectedLessonId(activeSession.activeLessonId);
-              // Auto launch if needed, or just highlight
               const sessionLesson = lessons.find(l => l.id === activeSession.activeLessonId);
+              if (profile?.role === "student" && profile?.grade && sessionLesson) {
+                if (!isGradeMatch(profile.grade, sessionLesson.grade)) {
+                  alert(`عذراً، هذه الحصة مخصصة لصف آخر (${sessionLesson.grade}) ولا يمكنك الانضمام إليها. صفك المسجل هو: ${getGradeLabel(normalizeGrade(profile.grade) || 1)}`);
+                  return;
+                }
+              }
+              setSelectedLessonId(activeSession.activeLessonId);
               if (sessionLesson) {
                 const config: ReaderConfig = {
                   lessonId: sessionLesson.id,
@@ -308,6 +323,12 @@ export default function Dashboard() {
             <button 
               onClick={async () => {
                 const sessionLesson = lessons.find(l => l.id === studentAssignment.lessonId);
+                if (profile?.role === "student" && profile?.grade && sessionLesson) {
+                  if (!isGradeMatch(profile.grade, sessionLesson.grade)) {
+                    alert(`عذراً، هذا التكليف مخصص لصف آخر (${sessionLesson.grade}). صفك المسجل هو: ${getGradeLabel(normalizeGrade(profile.grade) || 1)}`);
+                    return;
+                  }
+                }
                 if (sessionLesson) {
                   const config: ReaderConfig = {
                     lessonId: sessionLesson.id,
@@ -433,20 +454,29 @@ export default function Dashboard() {
 
               {/* Grade Selector */}
               <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-2">
-                  {["1", "2", "3", "4", "5", "6"].map(g => (
-                    <motion.button 
-                      key={g} 
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => setGrade(g)} 
-                      className={cn("flex flex-col items-center justify-center p-3 rounded-2xl border border-[var(--border)] transition-all", grade === g ? "bg-[var(--primary)] text-white border-[var(--primary)]" : "bg-[var(--bg)] text-[var(--text)]")}
-                    >
-                      <span className="text-xl font-bold">{toIndianNumbers(g)}</span>
-                      <span className="text-[10px]">الصف</span>
-                    </motion.button>
-                  ))}
-                </div>
+                {profile?.role === "student" && profile?.grade ? (
+                  <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between text-xs">
+                    <span className="font-bold text-blue-900">صفك الدراسي المسجل:</span>
+                    <span className="bg-blue-600 text-white px-3 py-1 rounded-full font-black text-xs">
+                      {getGradeLabel(normalizeGrade(profile.grade) || 1)}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {["1", "2", "3", "4", "5", "6"].map(g => (
+                      <motion.button 
+                        key={g} 
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => setGrade(g)} 
+                        className={cn("flex flex-col items-center justify-center p-3 rounded-2xl border border-[var(--border)] transition-all", grade === g ? "bg-[var(--primary)] text-white border-[var(--primary)]" : "bg-[var(--bg)] text-[var(--text)]")}
+                      >
+                        <span className="text-xl font-bold">{toIndianNumbers(g)}</span>
+                        <span className="text-[10px]">الصف</span>
+                      </motion.button>
+                    ))}
+                  </div>
+                )}
               </div>
             </motion.div>
             )}
@@ -645,35 +675,41 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {profile?.role === "student" && (
-                <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-[var(--text-light)] px-2">الصف</label>
-                      <select value={editGrade} onChange={(e) => setEditGrade(e.target.value)} required className="w-full px-4 py-3 rounded-full border bg-[var(--bg)]">
-                        <option value="">الصف</option>
-                        {[1,2,3,4,5,6].map(g => <option key={g} value={g}>{toIndianNumbers(g)}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-[var(--text-light)] px-2">الفصل الدراسي</label>
-                      <select value={editSemester} onChange={(e) => setEditSemester(e.target.value)} required className="w-full px-4 py-3 rounded-full border bg-[var(--bg)]">
-                        <option value="">الفصل الدراسي</option>
-                        {["الفصل الدراسي الأول", "الفصل الدراسي الثاني"].map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
+              {profile?.role === "student" ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-xs text-blue-900 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold">الصف الدراسي:</span>
+                    <span className="font-black bg-white px-3 py-1 rounded-full border border-blue-200 text-blue-800 shadow-2xs">
+                      {getGradeLabel(normalizeGrade(profile.grade) || 1)}
+                    </span>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-[var(--text-light)] px-2">الفصل</label>
-                      <select value={editSection} onChange={(e) => setEditSection(e.target.value)} required className="w-full px-4 py-3 rounded-full border bg-[var(--bg)]">
-                        <option value="">الفصل</option>
-                        {["أ", "ب", "ج", "د"].map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold">الشعبة / الفصل:</span>
+                    <span className="font-black bg-white px-3 py-1 rounded-full border border-blue-200 text-blue-800 shadow-2xs">
+                      الشعبة ({profile.section || "أ"})
+                    </span>
                   </div>
-                </>
+                  <p className="text-[10px] text-gray-500 pt-1.5 border-t border-blue-100 leading-normal">
+                    * الصف والشعبة مسجلان من قبل إدارة المدرسة والمعلم، ولا يمكن تغييرهما من قبل الطالب.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-[var(--text-light)] px-2">الصف</label>
+                    <select value={editGrade} onChange={(e) => setEditGrade(e.target.value)} required className="w-full px-4 py-3 rounded-full border bg-[var(--bg)]">
+                      <option value="">الصف</option>
+                      {[1,2,3,4,5,6].map(g => <option key={g} value={g}>{toIndianNumbers(g)}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-[var(--text-light)] px-2">الفصل</label>
+                    <select value={editSection} onChange={(e) => setEditSection(e.target.value)} required className="w-full px-4 py-3 rounded-full border bg-[var(--bg)]">
+                      <option value="">الفصل</option>
+                      {["أ", "ب", "ج", "د"].map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
               )}
 
               <div className="space-y-3 pt-2 border-t border-[var(--border)]">
