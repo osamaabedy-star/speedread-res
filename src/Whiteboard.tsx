@@ -358,10 +358,10 @@ export default function Whiteboard() {
           </div>
         ) : (
           /* نمط 2: العرض العادي للنص على كامل الشاشة دون اقتطاع */
-          <div className="w-full h-full overflow-y-auto p-8 sm:p-16 flex flex-col items-center">
+          <div className="w-full h-full overflow-y-auto p-8 sm:p-16">
             <div 
               className={cn(
-                "max-w-6xl mx-auto my-auto text-center transition-all duration-700 py-8",
+                "max-w-6xl mx-auto text-center transition-all duration-700 py-8",
                 focusMode ? "text-white/20" : "text-black"
               )}
               style={{ 

@@ -157,7 +157,14 @@ export default function Login() {
       const syntheticPassword = `std-${cleanId}`;
 
       try {
-        await signInWithEmailAndPassword(auth, syntheticEmail, syntheticPassword);
+        const cred = await signInWithEmailAndPassword(auth, syntheticEmail, syntheticPassword);
+        // Ensure student grade and section stay synchronized with official school roster in Firestore
+        await setDoc(doc(db, "users", cred.user.uid), {
+          grade: rosterData.grade,
+          section: rosterData.section,
+          fullName: rosterData.fullName,
+          role: "student"
+        }, { merge: true });
       } catch (loginErr: any) {
         if (loginErr.code === "auth/user-not-found" || loginErr.code === "auth/invalid-credential") {
           const result = await createUserWithEmailAndPassword(auth, syntheticEmail, syntheticPassword);

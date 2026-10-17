@@ -89,6 +89,7 @@ export default function TeacherDashboard() {
   const [todayCompletedStudentIds, setTodayCompletedStudentIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
 
   // Save selected grade/section in session storage
   useEffect(() => {
@@ -533,6 +534,8 @@ export default function TeacherDashboard() {
       ));
       const completedIds = Array.from(new Set(todaySnap.docs.map(d => d.data().userId as string)));
       setTodayCompletedStudentIds(completedIds);
+      setRefreshSuccess(true);
+      setTimeout(() => setRefreshSuccess(false), 3000);
     } catch (error) {
       console.error("Manual refresh failed:", error);
     } finally {
@@ -689,10 +692,19 @@ export default function TeacherDashboard() {
           
           <button 
             onClick={handleManualRefresh}
-            className="p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl transition-all"
-            title="تحديث البيانات فوراً"
+            disabled={isRefreshing}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold transition-all border shadow-2xs cursor-pointer",
+              refreshSuccess 
+                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                : isRefreshing
+                  ? "bg-blue-50 text-blue-700 border-blue-200"
+                  : "bg-gray-100 hover:bg-gray-200 text-gray-700 border-gray-200"
+            )}
+            title="تحديث البيانات فوراً من قاعدة البيانات"
           >
-            <RefreshCw size={14} className={cn(isRefreshing && "animate-spin text-blue-600")} />
+            <RefreshCw size={13} className={cn(isRefreshing && "animate-spin text-blue-600")} />
+            <span>{isRefreshing ? "جاري التحديث..." : refreshSuccess ? "تم التحديث ✓" : "تحديث"}</span>
           </button>
         </div>
       </div>

@@ -466,16 +466,6 @@ export default function Reader() {
         {/* النمط 2: التمرير الانسيابي (Teleprompter) */}
         {readingMode === "scroll" && (
           <div className="relative w-full h-full overflow-hidden flex flex-col items-center justify-start pt-16">
-            {/* خط التتبع المركزي */}
-            <div className="absolute top-1/2 left-0 right-0 -translate-y-1/2 h-20 border-y-2 border-blue-400/25 bg-blue-50/15 pointer-events-none z-10 flex items-center justify-between px-6">
-              <span className="text-[10px] font-black text-blue-600 bg-white/90 px-2 py-0.5 rounded-full border border-blue-200 shadow-2xs">
-                📜 خط القراءة والانسياب
-              </span>
-              <span className="text-[10px] font-bold text-gray-500 bg-white/80 px-2 py-0.5 rounded-full">
-                سرعة: {toIndianNumbers(speed)} كلمة/دقيقة
-              </span>
-            </div>
-
             <div 
               ref={scrollRef} 
               style={{ fontFamily: config?.font || "Tajawal", fontSize: `${fontSize}px`, lineHeight }} 

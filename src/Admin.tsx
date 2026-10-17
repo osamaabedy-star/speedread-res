@@ -4,7 +4,7 @@ import { useAuth } from "./AuthContext";
 import { UserProfile } from "./types";
 import { cn, toIndianNumbers, normalizeGrade, getGradeLabel, normalizeSemester, normalizeSection } from "./utils";
 import { motion, AnimatePresence } from "motion/react";
-import { ShieldCheck, Users, UserCheck, Trash2, ToggleLeft, ToggleRight, RefreshCw, Loader2, Home, Search, Filter, UserPlus, GraduationCap, BookOpen, X, FileDown, Upload, Cloud, FolderPlus, ChartLine, Sparkles, Plus, CheckCircle2, AlertCircle as AlertIcon, ListTodo, Database, Monitor, Edit2, Pencil, ArrowRightLeft, CheckSquare, Square, Check, AlertTriangle } from "lucide-react";
+import { ShieldCheck, Users, UserCheck, Trash2, ToggleLeft, ToggleRight, RefreshCw, Loader2, Home, Search, Filter, UserPlus, GraduationCap, BookOpen, X, FileDown, Upload, Cloud, FolderPlus, ChartLine, Sparkles, Plus, CheckCircle2, AlertCircle as AlertIcon, ListTodo, Database, Monitor, Edit2, Pencil, ArrowRightLeft, CheckSquare, Square, Check, AlertTriangle, HelpCircle, Save } from "lucide-react";
 import Papa from "papaparse";
 import { collection, getDocs, updateDoc, deleteDoc, doc, query, orderBy, setDoc, where, addDoc } from "firebase/firestore";
 import { ReadingSession, QuizResult, Lesson } from "./types";
@@ -77,6 +77,19 @@ export default function Admin() {
   const [isDeletingLesson, setIsDeletingLesson] = useState(false);
   const [questionToDelete, setQuestionToDelete] = useState<{ id: string; text: string } | null>(null);
   const [isDeletingQuestion, setIsDeletingQuestion] = useState(false);
+
+  // Lessons Filtering and Editing States
+  const [lessonGradeFilter, setLessonGradeFilter] = useState("all");
+  const [lessonSemesterFilter, setLessonSemesterFilter] = useState("all");
+  const [lessonAdminSearch, setLessonAdminSearch] = useState("");
+  const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
+  const [viewingLessonDetails, setViewingLessonDetails] = useState<Lesson | null>(null);
+  
+  // Bulk lessons importer states
+  const [bulkLessonGrade, setBulkLessonGrade] = useState("1");
+  const [bulkLessonSemester, setBulkLessonSemester] = useState("الفصل الدراسي الأول");
+  const [bulkLessonText, setBulkLessonText] = useState("");
+  const [isBulkImportingLessons, setIsBulkImportingLessons] = useState(false);
 
   // Bulk Selection and Batch Action State
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
@@ -326,8 +339,50 @@ export default function Admin() {
   const fetchCustomLessons = async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, "lessons"), orderBy("createdAt", "desc")));
-      setLessonsList(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Lesson)));
+      // 1. Load static curriculum lessons from JSON
+      const files = [
+        "upper_first.json", "upper_second.json",
+        "primary_first.json", "primary_second.json",
+        "lessons_part1.json", "lessons_part2.json", "lessons_part3.json", "lessons_part4.json", "lessons_part5.json",
+        "lessons_1_2_part1.json"
+      ];
+      let staticLoaded: Lesson[] = [];
+      for (const file of files) {
+        try {
+          const res = await fetch(`/${file}`);
+          if (res.ok) {
+            const data: Lesson[] = await res.json();
+            staticLoaded = [...staticLoaded, ...data];
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // 2. Fetch all Firestore custom lessons (without orderBy to avoid dropping lessons missing createdAt)
+      const snap = await getDocs(collection(db, "lessons"));
+      const firestoreLessons = snap.docs.map(doc => ({ id: doc.id, ...doc.data(), isCustom: true } as any));
+
+      // 3. Merge: Firestore lessons override static ones if ID or title match
+      const mergedMap = new Map<string, Lesson>();
+      staticLoaded.forEach(l => mergedMap.set(l.id || l.title, l));
+      firestoreLessons.forEach(l => {
+        if (!l.isDeleted) {
+          mergedMap.set(l.id || l.title, l);
+        } else {
+          mergedMap.delete(l.id || l.title);
+        }
+      });
+
+      const combined = Array.from(mergedMap.values());
+      // Sort nicely by grade then title
+      combined.sort((a, b) => {
+        const ga = normalizeGrade(a.grade) || 99;
+        const gb = normalizeGrade(b.grade) || 99;
+        if (ga !== gb) return ga - gb;
+        return a.title.localeCompare(b.title, "ar");
+      });
+      setLessonsList(combined);
     } catch (error) {
       console.error("Failed to fetch lessons:", error);
     } finally {
@@ -757,7 +812,7 @@ export default function Admin() {
     if (!lessonToDelete) return;
     setIsDeletingLesson(true);
     try {
-      await deleteDoc(doc(db, "lessons", lessonToDelete.id));
+      await setDoc(doc(db, "lessons", lessonToDelete.id), { isDeleted: true }, { merge: true });
       showNotice(`تم حذف الدرس "${lessonToDelete.title}" بنجاح.`);
       setLessonToDelete(null);
       fetchCustomLessons();
@@ -783,6 +838,143 @@ export default function Admin() {
       alert("فشل حذف السؤال: " + e.message);
     } finally {
       setIsDeletingQuestion(false);
+    }
+  };
+
+  // Save edited lesson and its questions
+  const handleSaveEditedLesson = async () => {
+    if (!editingLesson || !editingLesson.title.trim() || !editingLesson.content.trim()) {
+      alert("يرجى كتابة عنوان الدرس ونصه كاملاً.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const lessonId = editingLesson.id || ("lesson_" + Date.now());
+      const numGrade = normalizeGrade(editingLesson.grade) || 1;
+      const cleanQuestions = (editingLesson.questions || []).filter(q => q.text && q.text.trim());
+
+      const payload: any = {
+        title: editingLesson.title.trim(),
+        content: editingLesson.content.trim(),
+        grade: getGradeLabel(numGrade),
+        semester: editingLesson.semester || "الفصل الدراسي الأول",
+        questions: cleanQuestions,
+        updatedAt: new Date().toISOString(),
+        isCustom: true
+      };
+
+      await setDoc(doc(db, "lessons", lessonId), payload, { merge: true });
+      showNotice(`تم حفظ تعديلات درس "${editingLesson.title}" بنجاح!`);
+      setEditingLesson(null);
+      await fetchCustomLessons();
+    } catch (e: any) {
+      alert("فشل حفظ التعديلات: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Bulk import multiple lessons with questions directed to Grade and Semester
+  const handleBulkImportLessons = async () => {
+    if (!bulkLessonText.trim()) {
+      alert("الرجاء إدخال أو لصق نصوص الدروس أولاً.");
+      return;
+    }
+    setIsBulkImportingLessons(true);
+    try {
+      const targetGradeLabel = getGradeLabel(normalizeGrade(bulkLessonGrade) || 1);
+      const targetSemesterLabel = bulkLessonSemester;
+      let parsedLessons: { title: string; content: string; questions?: any[] }[] = [];
+
+      const trimmed = bulkLessonText.trim();
+      // Try JSON
+      if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+        try {
+          const raw = JSON.parse(trimmed);
+          const list = Array.isArray(raw) ? raw : [raw];
+          parsedLessons = list.map((item: any) => ({
+            title: String(item.title || item.العنوان || "درس جديد").trim(),
+            content: String(item.content || item.النص || "").trim(),
+            questions: Array.isArray(item.questions || item.الأسئلة) ? (item.questions || item.الأسئلة) : []
+          })).filter(l => l.title && l.content);
+        } catch (err) {
+          // fallback to text parsing
+        }
+      }
+
+      // If not JSON, parse structured text
+      if (parsedLessons.length === 0) {
+        const blocks = trimmed.split(/---+/).map(b => b.trim()).filter(Boolean);
+        for (const block of blocks) {
+          const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
+          let title = "";
+          let contentLines: string[] = [];
+          let questions: any[] = [];
+          let currentQ: any = null;
+
+          for (const line of lines) {
+            if (/^(العنوان|عنوان الدرس|title)\s*[:：]/i.test(line)) {
+              title = line.replace(/^(العنوان|عنوان الدرس|title)\s*[:：]/i, "").trim();
+            } else if (/^(النص|نص القراءة|المحتوى|content)\s*[:：]/i.test(line)) {
+              contentLines.push(line.replace(/^(النص|نص القراءة|المحتوى|content)\s*[:：]/i, "").trim());
+            } else if (/^(سؤال|السؤال|q|question)\s*[\d]*[:：]/i.test(line)) {
+              if (currentQ) questions.push(currentQ);
+              currentQ = {
+                text: line.replace(/^(سؤال|السؤال|q|question)\s*[\d]*[:：]/i, "").trim(),
+                type: "multiple",
+                options: [],
+                correct: 0
+              };
+            } else if (/^(خيارات|الخيارات|options)\s*[:：]/i.test(line)) {
+              const optsStr = line.replace(/^(خيارات|الخيارات|options)\s*[:：]/i, "").trim();
+              const opts = optsStr.split(/[|،,]/).map(o => o.trim()).filter(Boolean);
+              if (currentQ) currentQ.options = opts;
+            } else if (/^(صحيح|الجواب الصحيح|الخيار الصحيح|correct)\s*[:：]/i.test(line)) {
+              const cStr = line.replace(/^(صحيح|الجواب الصحيح|الخيار الصحيح|correct)\s*[:：]/i, "").trim();
+              const cIdx = parseInt(cStr, 10);
+              if (currentQ) currentQ.correct = isNaN(cIdx) ? 0 : Math.max(0, cIdx - 1);
+            } else {
+              if (!currentQ) {
+                contentLines.push(line);
+              }
+            }
+          }
+          if (currentQ) questions.push(currentQ);
+
+          const fullContent = contentLines.join("\n").trim();
+          if (title && fullContent) {
+            parsedLessons.push({ title, content: fullContent, questions });
+          }
+        }
+      }
+
+      if (parsedLessons.length === 0) {
+        alert("لم يتم العثور على دروس صالحة. تأكد من وجود (العنوان:) و (النص:) أو اضغط على 'نموذج جاهز'.");
+        return;
+      }
+
+      let count = 0;
+      for (const item of parsedLessons) {
+        await addDoc(collection(db, "lessons"), {
+          title: item.title,
+          content: item.content,
+          grade: targetGradeLabel,
+          semester: targetSemesterLabel,
+          questions: item.questions || [],
+          authorId: profile?.uid || "admin",
+          createdAt: new Date().toISOString(),
+          isCustom: true
+        });
+        count++;
+      }
+
+      showNotice(`تمت إضافة وتوجيه ${toIndianNumbers(count)} دروس بنجاح إلى ${targetGradeLabel} (${targetSemesterLabel})!`);
+      setBulkLessonText("");
+      await fetchCustomLessons();
+    } catch (e: any) {
+      alert("حدث خطأ أثناء الإضافة: " + e.message);
+    } finally {
+      setIsBulkImportingLessons(false);
     }
   };
 
@@ -1036,6 +1228,22 @@ export default function Admin() {
                         filter === "student" ? u.role === "student" : 
                         u.role === "student");
     return searchMatch && filterMatch;
+  });
+
+  const filteredAdminLessons = lessonsList.filter(l => {
+    const lGrade = normalizeGrade(l.grade);
+    const filterGrade = normalizeGrade(lessonGradeFilter);
+    const gradeMatch = lessonGradeFilter === "all" || lGrade === filterGrade;
+
+    const lSem = normalizeSemester(l.semester);
+    const filterSem = lessonSemesterFilter === "all" ? null : normalizeSemester(lessonSemesterFilter);
+    const semMatch = !filterSem || lSem === filterSem;
+
+    const searchMatch = !lessonAdminSearch || 
+      l.title.toLowerCase().includes(lessonAdminSearch.toLowerCase()) || 
+      (l.content && l.content.toLowerCase().includes(lessonAdminSearch.toLowerCase()));
+
+    return gradeMatch && semMatch && searchMatch;
   });
 
   return (
@@ -1355,255 +1563,452 @@ export default function Admin() {
 
         {activeTab === "lessons" && (
           <motion.div key="lessons" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8">
-            <div className="bg-[var(--card-bg)] rounded-[var(--radius-lg)] p-8 border border-[var(--border)] shadow-md space-y-6">
-              <h3 className="text-xl font-bold text-[var(--primary)] flex items-center gap-2">
-                <Upload size={24} /> 
-                <span>إضافة الدروس والأسئلة دفعة واحدة</span>
-              </h3>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="space-y-6">
-                  <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100 space-y-4">
-                    <h4 className="font-black text-blue-800">نموذج ملف CSV للدروس:</h4>
-                    <div className="bg-white p-4 rounded-2xl border border-blue-200 overflow-x-auto shadow-inner">
-                      <table className="text-[10px] text-right w-full font-bold">
-                        <thead className="bg-blue-50">
-                          <tr className="border-b border-blue-100">
-                            <th className="p-2">العنوان</th>
-                            <th className="p-2">النص</th>
-                            <th className="p-2">الصف</th>
-                            <th className="p-2">الفصل الدراسي</th>
-                            <th className="p-2">سؤال١</th>
-                            <th className="p-2">خيار١</th>
-                            <th className="p-2">صحيح</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr className="border-b border-blue-50">
-                            <td className="p-2 truncate max-w-[80px]">نص القراءة</td>
-                            <td className="p-2 truncate max-w-[100px]">المحتوى...</td>
-                            <td className="p-2">1</td>
-                            <td className="p-2 text-[8px]">الفصل الأول</td>
-                            <td className="p-2">ما المعنى؟</td>
-                            <td className="p-2">خيار أ</td>
-                            <td className="p-2">1</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-blue-600 font-bold">الأعمدة المطلوبة (العناوين في أول صف):</p>
-                      <p className="text-[9px] text-blue-500 bg-white/50 p-2 rounded-lg leading-relaxed">
-                        العنوان، النص، الصف، الفصل الدراسي، سؤال١، سؤال١_خيار١، سؤال١_خيار٢، سؤال١_خيار٣، سؤال١_خيار٤، سؤال١_صحيح (١-٤)
-                      </p>
-                    </div>
-                    <div className="flex gap-4">
-                      <button onClick={downloadLessonTemplate} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-xs hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
-                        <FileDown size={16} />
-                        تحميل القالب
-                      </button>
-                      <label className="flex-1 py-3 bg-white text-blue-600 border-2 border-blue-600 rounded-xl font-bold text-xs hover:bg-blue-50 transition-all flex items-center justify-center gap-2 cursor-pointer">
-                        <Upload size={16} />
-                        رفع ملف CSV
-                        <input type="file" accept=".csv" onChange={handleLessonCSVUpload} className="hidden" />
-                      </label>
-                    </div>
+            
+            {/* 1. أداة الإضافة الجماعية السريعة للدروس مع الأسئلة */}
+            <div className="bg-[var(--card-bg)] rounded-3xl p-6 sm:p-8 border border-[var(--border)] shadow-md space-y-5">
+              <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[var(--border)]">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-black">
+                    <Sparkles size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-gray-900">
+                      ⚡ إضافة كمية كبيرة من الدروس والأسئلة دفعة واحدة
+                    </h3>
+                    <p className="text-xs text-gray-500 font-bold">
+                      حدد الصف والفصل الدراسي المستهدف، ثم الصق الدروس والأسئلة (نصياً أو بصيغة JSON) ليتم حفظها وتوجيهها فوراً
+                    </p>
                   </div>
                 </div>
-
-                <div className="space-y-6">
-                  <div className="bg-purple-50 p-6 rounded-3xl border border-purple-100 space-y-4">
-                    <h4 className="font-black text-purple-800 flex items-center gap-2">
-                      <Sparkles size={20} />
-                      توليد درس بالذكاء الاصطناعي
-                    </h4>
-                    <div className="space-y-3">
-                      <input 
-                        type="text" 
-                        placeholder="أدخل موضوع الدرس (مثلاً: أهمية الصدق)" 
-                        value={aiTopic}
-                        onChange={(e) => setAiTopic(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-purple-200 outline-none focus:border-purple-500 bg-white"
-                      />
-                      <div className="grid grid-cols-2 gap-2">
-                        <select 
-                          value={aiGrade} 
-                          onChange={(e) => setAiGrade(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-purple-200 bg-white font-bold text-sm"
-                        >
-                          {[1,2,3,4,5,6].map(g => <option key={g} value={g.toString()}>الصف {toIndianNumbers(g)}</option>)}
-                        </select>
-                        <select 
-                          value={aiSemester} 
-                          onChange={(e) => setAiSemester(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-purple-200 bg-white font-bold text-sm"
-                        >
-                          <option value="الفصل الدراسي الأول">الفصل الدراسي الأول</option>
-                          <option value="الفصل الدراسي الثاني">الفصل الدراسي الثاني</option>
-                          <option value="الفصل الدراسي الثالث">الفصل الدراسي الثالث</option>
-                          <option value="دروس خارجية عن الكتاب">دروس خارجية عن الكتاب</option>
-                        </select>
-                      </div>
-                      <button 
-                        onClick={handleGenerateLesson}
-                        disabled={isGenerating || !aiTopic}
-                        className="w-full py-4 bg-purple-600 text-white rounded-xl font-black hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        {isGenerating ? <Loader2 className="animate-spin" /> : <Sparkles size={20} />}
-                        <span>توليد الدرس والأسئلة الآن</span>
-                      </button>
-                    </div>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkLessonText(`[
+  {
+    "title": "رحلة إلى الفضاء",
+    "content": "انطلقت المركبة الفضائية في رحلة استكشافية مذهلة نحو كواكب المجموعة الشمسية. شاهد رواد الفضاء كوكب الأرض من بعيد كجوهرة زرقاء تسبح في الفضاء الفسيح.",
+    "questions": [
+      {
+        "text": "ما هي وجهة المركبة الفضائية؟",
+        "options": ["المجموعة الشمسية", "أعماق المحيط", "باطن الأرض", "قمة الجبل"],
+        "correct": 0
+      },
+      {
+        "text": "كيف بدا كوكب الأرض لرواد الفضاء؟",
+        "options": ["كجوهرة زرقاء", "كقرص أسود", "كمثلث فضي", "كنجم أحمر"],
+        "correct": 0
+      }
+    ]
+  },
+  {
+    "title": "النحلة النشيطة",
+    "content": "تستيقظ النحلة مع خيوط الفجر الأولى وتتنقل بهمة ونشاط بين الأزهار لجمع الرحيق اللذيذ وصنع العسل الصافي فيه شفاء للناس.",
+    "questions": [
+      {
+        "text": "متى تستيقظ النحلة؟",
+        "options": ["مع خيوط الفجر", "في منتصف الليل", "عند غروب الشمس", "وقت الظهيرة"],
+        "correct": 0
+      }
+    ]
+  }
+]`);
+                      showNotice("تم إدراج نموذج تجريبي بصيغة JSON بنجاح.");
+                    }}
+                    className="px-3 py-1.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold text-xs hover:bg-blue-100 transition-all cursor-pointer"
+                  >
+                    📋 نموذج جاهز (JSON)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkLessonText(`العنوان: رحلة إلى الفضاء
+النص: انطلقت المركبة الفضائية في رحلة استكشافية مذهلة نحو كواكب المجموعة الشمسية. شاهد رواد الفضاء كوكب الأرض من بعيد كجوهرة زرقاء تسبح في الفضاء الفسيح.
+سؤال: ما هي وجهة المركبة الفضائية؟
+خيارات: المجموعة الشمسية | أعماق المحيط | باطن الأرض | قمة الجبل
+صحيح: 1
+سؤال: كيف بدا كوكب الأرض لرواد الفضاء؟
+خيارات: كجوهرة زرقاء | كقرص أسود | كمثلث فضي | كنجم أحمر
+صحيح: 1
+---
+العنوان: النحلة النشيطة
+النص: تستيقظ النحلة مع خيوط الفجر الأولى وتتنقل بهمة ونشاط بين الأزهار لجمع الرحيق اللذيذ وصنع العسل الصافي فيه شفاء للناس.
+سؤال: متى تستيقظ النحلة؟
+خيارات: مع خيوط الفجر | في منتصف الليل | عند غروب الشمس | وقت الظهيرة
+صحيح: 1`);
+                      showNotice("تم إدراج نموذج نصي مبسط بنجاح.");
+                    }}
+                    className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-xs hover:bg-emerald-100 transition-all cursor-pointer"
+                  >
+                    📝 نموذج جاهز (نصي مبسط)
+                  </button>
                 </div>
               </div>
-            </div>
 
-
-            {/* Quick Add Lesson */}
-            <div className="bg-[var(--card-bg)] rounded-[var(--radius-lg)] p-8 border border-[var(--border)] shadow-md space-y-6">
-              <h3 className="text-xl font-bold text-[var(--primary)] flex items-center gap-2">
-                <BookOpen size={24} /> 
-                <span>إضافة درس يدوي سريع</span>
-              </h3>
-              <form onSubmit={async (e) => {
-                e.preventDefault();
-                const formData = new FormData(e.currentTarget);
-                const title = formData.get("title") as string;
-                const content = formData.get("content") as string;
-                const lessonGradeRaw = formData.get("grade") as string;
-                const lessonSemester = (formData.get("semester") as string) || "الفصل الدراسي الأول";
-                if (!title || !content || !lessonGradeRaw) return;
-                setLoading(true);
-                try {
-                  const numGrade = normalizeGrade(lessonGradeRaw) || 1;
-                  await addDoc(collection(db, "lessons"), {
-                    title: title.trim(),
-                    content: content.trim(),
-                    grade: getGradeLabel(numGrade),
-                    semester: lessonSemester,
-                    authorId: profile?.uid || "admin",
-                    createdAt: new Date().toISOString(),
-                    questions: [],
-                    isCustom: true
-                  });
-                  alert("تم حفظ الدرس بنجاح ومزامنته مع لوحات المعلمين فوراً");
-                  e.currentTarget.reset();
-                  fetchCustomLessons();
-                } catch (err) {
-                  alert("فشل الحفظ: " + err);
-                } finally {
-                  setLoading(false);
-                }
-              }} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <input name="title" type="text" placeholder="عنوان الدرس" required className="px-4 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] outline-none focus:border-[var(--primary)] font-bold" />
-                  <select name="grade" required className="px-4 py-2 rounded-lg border bg-[var(--bg)] outline-none focus:border-[var(--primary)] font-bold">
-                    <option value="">حدد الصف...</option>
-                    {[1,2,3,4,5,6].map(g => <option key={g} value={g.toString()}>الصف {toIndianNumbers(g)}</option>)}
+              {/* اختيار الصف والفصل الدراسي لتوجيه الدروس المضافة */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-[var(--bg)] p-4 rounded-2xl border border-[var(--border)]">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">الصف الدراسي المستهدف:</label>
+                  <select 
+                    value={bulkLessonGrade} 
+                    onChange={e => setBulkLessonGrade(e.target.value)} 
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-black outline-none focus:border-blue-500"
+                  >
+                    {[1, 2, 3, 4, 5, 6].map(g => (
+                      <option key={g} value={g.toString()}>{getGradeLabel(g)}</option>
+                    ))}
                   </select>
-                  <select name="semester" required className="px-4 py-2 rounded-lg border bg-[var(--bg)] outline-none focus:border-[var(--primary)] font-bold">
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">الفصل الدراسي:</label>
+                  <select 
+                    value={bulkLessonSemester} 
+                    onChange={e => setBulkLessonSemester(e.target.value)} 
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-black outline-none focus:border-blue-500"
+                  >
                     <option value="الفصل الدراسي الأول">الفصل الدراسي الأول</option>
                     <option value="الفصل الدراسي الثاني">الفصل الدراسي الثاني</option>
                     <option value="الفصل الدراسي الثالث">الفصل الدراسي الثالث</option>
                     <option value="دروس خارجية عن الكتاب">دروس خارجية عن الكتاب</option>
                   </select>
                 </div>
-                <textarea name="content" placeholder="نص القراءة للدرس..." required className="w-full px-4 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] outline-none focus:border-[var(--primary)] min-h-[140px] leading-relaxed" />
-                <button type="submit" disabled={loading} className="w-full py-3 bg-[var(--primary)] text-white rounded-xl font-bold hover:shadow-md transition-all">إضافة الدرس للمكتبة ومشاركته مع المعلمين</button>
-              </form>
-            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-8">
-              {/* Lesson Creator */}
-              <div className="bg-[var(--card-bg)] rounded-[var(--radius-lg)] p-8 border border-[var(--border)] shadow-md space-y-6">
-                <h3 className="text-xl font-bold text-[var(--primary)] flex items-center gap-2">
-                  <Sparkles size={24} className="text-orange-500" /> 
-                  <span>إنشاء درس ذكي (AI)</span>
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                  <div className="sm:col-span-2">
-                    <input type="text" placeholder="موضوع الدرس (مثلاً: الفضاء، ترشيد المياه...)" value={aiTopic} onChange={(e) => setAiTopic(e.target.value)} className="w-full px-6 py-3 rounded-full border border-[var(--border)] bg-[var(--bg)] outline-none focus:border-[var(--primary)] font-bold text-sm" />
-                  </div>
-                  <select value={aiGrade} onChange={(e) => setAiGrade(e.target.value)} className="px-4 py-3 rounded-full border border-[var(--border)] bg-[var(--bg)] outline-none font-bold text-sm">
-                    {[1,2,3,4,5,6].map(g => <option key={g} value={g}>الصف {toIndianNumbers(g)}</option>)}
-                  </select>
-                  <select value={aiSemester} onChange={(e) => setAiSemester(e.target.value)} className="px-4 py-3 rounded-full border border-[var(--border)] bg-[var(--bg)] outline-none font-bold text-sm">
-                    <option value="الفصل الدراسي الأول">الفصل الأول</option>
-                    <option value="الفصل الدراسي الثاني">الفصل الثاني</option>
-                    <option value="الفصل الدراسي الثالث">الفصل الثالث</option>
-                    <option value="دروس خارجية عن الكتاب">دروس خارجية</option>
-                  </select>
+                <div className="sm:col-span-2 flex items-end">
+                  <p className="text-[11px] text-gray-500 font-bold">
+                    * سيتم إسناد كافة الدروس والأسئلة الملصوقة بالأسفل مباشرة إلى هذا الصف وهذا الفصل الدراسي.
+                  </p>
                 </div>
-                <button onClick={handleGenerateLesson} disabled={isGenerating || !aiTopic} className="w-full py-4 bg-orange-600 text-white rounded-full font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50">
-                  {isGenerating ? <Loader2 className="animate-spin" /> : <Sparkles size={18} />}
-                  <span>توليد الدرس والأسئلة بواسطة الذكاء الاصطناعي</span>
-                </button>
-
-                {generatedLesson && (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-8 border-t pt-8 space-y-6">
-                    <div className="bg-[var(--bg)] p-6 rounded-3xl border-2 border-orange-100 space-y-3">
-                      <h4 className="text-2xl font-black text-[var(--primary)]">{generatedLesson.title}</h4>
-                      <div className="text-sm leading-relaxed text-[var(--text)] whitespace-pre-line max-h-72 overflow-y-auto p-2 bg-white/60 rounded-xl border border-orange-50">{generatedLesson.content}</div>
-                    </div>
-                    
-                    <div className="space-y-3">
-                      <h5 className="font-bold text-sm">الأسئلة المقترحة ({toIndianNumbers(generatedLesson.questions?.length || 0)})</h5>
-                      {generatedLesson.questions?.map((q: any, idx: number) => (
-                        <div key={idx} className="bg-white p-4 rounded-2xl border text-xs flex items-center justify-between">
-                          <span>{toIndianNumbers(idx + 1)}. {q.text}</span>
-                          <span className="text-green-600 font-bold">({toIndianNumbers(q.options?.length)} خيارات)</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <button onClick={handleSaveLesson} className="w-full py-4 bg-[var(--success)] text-white rounded-full font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
-                       <Plus size={18} />
-                       <span>حفظ الدرس في المكتبة</span>
-                    </button>
-                  </motion.div>
-                )}
               </div>
 
-              {/* Custom Lessons List */}
-              <div className="bg-[var(--card-bg)] rounded-[var(--radius-lg)] p-8 border border-[var(--border)] shadow-md space-y-6">
-                <h3 className="text-xl font-bold text-[var(--primary)] flex items-center gap-2">
-                  <BookOpen size={24} /> 
-                  <span>الدروس المضافة</span>
+              <div className="space-y-2">
+                <textarea
+                  value={bulkLessonText}
+                  onChange={e => setBulkLessonText(e.target.value)}
+                  placeholder="الصق نصوص الدروس هنا... يمكنك استخدام زر 'نموذج جاهز' بالأعلى لمعاينة الشكل المطلوب وإضافة مئات الدروس دفعة واحدة."
+                  className="w-full px-4 py-3 rounded-2xl border border-[var(--border)] bg-[var(--bg)] outline-none focus:border-[var(--primary)] min-h-[160px] text-xs font-bold leading-relaxed resize-y"
+                  dir="rtl"
+                />
+              </div>
+
+              <div className="flex items-center justify-between flex-wrap gap-3 pt-2">
+                <div className="flex items-center gap-2">
+                  <label className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all">
+                    <Upload size={14} />
+                    <span>أو رفع ملف CSV / Excel</span>
+                    <input type="file" accept=".csv" onChange={handleLessonCSVUpload} className="hidden" />
+                  </label>
+                  <button 
+                    type="button" 
+                    onClick={downloadLessonTemplate} 
+                    className="px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-xl text-xs font-bold flex items-center gap-1"
+                  >
+                    <FileDown size={14} />
+                    <span>تحميل قالب Excel</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleBulkImportLessons}
+                  disabled={isBulkImportingLessons || !bulkLessonText.trim()}
+                  className="px-8 py-3 bg-[var(--primary)] hover:bg-[var(--primary-dark)] text-white rounded-xl text-xs font-black shadow-lg hover:shadow-xl transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {isBulkImportingLessons ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                  <span>حفظ وإضافة الدروس في المكتبة دفعة واحدة</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 2. إضافة درس يدوي فردي + توليد ذكي بالـ AI */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* إضافة درس فردي */}
+              <div className="bg-[var(--card-bg)] rounded-3xl p-6 border border-[var(--border)] shadow-md space-y-4">
+                <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
+                  <BookOpen size={18} className="text-blue-600" />
+                  <span>إضافة درس فردي محدد</span>
                 </h3>
-                <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 scrollbar-hide">
-                  {lessonsList.map(l => (
-                    <div key={l.id} className="bg-[var(--bg)] p-4 rounded-2xl border border-[var(--border)] flex items-center justify-between group hover:border-[var(--primary)] transition-all">
-                      <div>
-                        <h4 className="font-bold text-sm line-clamp-1">{l.title}</h4>
-                        <div className="flex items-center gap-3 mt-1">
-                          <span className="text-[10px] bg-primary/10 text-[var(--primary)] px-2 py-0.5 rounded-full font-bold">الصف {toIndianNumbers(l.grade)}</span>
-                          {l.isAI && <span className="text-[10px] text-orange-600 font-black flex items-center gap-0.5"><Sparkles size={8} /> AI</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button 
-                          onClick={() => alert(`العنوان: ${l.title}\nالصف: ${l.grade}\nالفصل الدراسي: ${l.semester || "غير محدد"}\n\nالنص:\n${l.content}`)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-all"
-                          title="عرض النص"
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  const title = formData.get("title") as string;
+                  const content = formData.get("content") as string;
+                  const lessonGradeRaw = formData.get("grade") as string;
+                  const lessonSemester = (formData.get("semester") as string) || "الفصل الدراسي الأول";
+                  if (!title || !content || !lessonGradeRaw) return;
+                  setLoading(true);
+                  try {
+                    const numGrade = normalizeGrade(lessonGradeRaw) || 1;
+                    await addDoc(collection(db, "lessons"), {
+                      title: title.trim(),
+                      content: content.trim(),
+                      grade: getGradeLabel(numGrade),
+                      semester: lessonSemester,
+                      authorId: profile?.uid || "admin",
+                      createdAt: new Date().toISOString(),
+                      questions: [],
+                      isCustom: true
+                    });
+                    showNotice("تم حفظ الدرس بنجاح في المكتبة!");
+                    e.currentTarget.reset();
+                    fetchCustomLessons();
+                  } catch (err: any) {
+                    alert("فشل الحفظ: " + err.message);
+                  } finally {
+                    setLoading(false);
+                  }
+                }} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input name="title" type="text" placeholder="عنوان الدرس" required className="px-3 py-2 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-bold outline-none focus:border-blue-500" />
+                    <select name="grade" required className="px-3 py-2 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-bold outline-none">
+                      <option value="">الصف...</option>
+                      {[1,2,3,4,5,6].map(g => <option key={g} value={g.toString()}>{getGradeLabel(g)}</option>)}
+                    </select>
+                    <select name="semester" required className="px-3 py-2 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-bold outline-none">
+                      <option value="الفصل الدراسي الأول">الفصل الأول</option>
+                      <option value="الفصل الدراسي الثاني">الفصل الثاني</option>
+                      <option value="الفصل الدراسي الثالث">الفصل الثالث</option>
+                      <option value="دروس خارجية عن الكتاب">دروس خارجية</option>
+                    </select>
+                  </div>
+                  <textarea name="content" placeholder="اكتب نص القراءة للدرس هنا..." required className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-normal min-h-[100px] outline-none focus:border-blue-500 leading-relaxed" />
+                  <button type="submit" disabled={loading} className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                    <Plus size={15} />
+                    <span>إضافة الدرس</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* توليد درس بالذكاء الاصطناعي */}
+              <div className="bg-[var(--card-bg)] rounded-3xl p-6 border border-[var(--border)] shadow-md space-y-4">
+                <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
+                  <Sparkles size={18} className="text-purple-600" />
+                  <span>توليد درس وأسئلة بالذكاء الاصطناعي (AI)</span>
+                </h3>
+                <div className="space-y-3">
+                  <input 
+                    type="text" 
+                    placeholder="موضوع الدرس (مثلاً: أمانة الرسول، رحلة في أعماق البحار...)" 
+                    value={aiTopic}
+                    onChange={(e) => setAiTopic(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-purple-200 bg-[var(--bg)] text-xs font-bold outline-none focus:border-purple-500"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={aiGrade} onChange={(e) => setAiGrade(e.target.value)} className="w-full px-3 py-2 rounded-xl border border-purple-200 bg-[var(--bg)] text-xs font-bold outline-none">
+                      {[1,2,3,4,5,6].map(g => <option key={g} value={g.toString()}>{getGradeLabel(g)}</option>)}
+                    </select>
+                    <select value={aiSemester} onChange={(e) => setAiSemester(e.target.value)} className="w-full px-3 py-2 rounded-xl border border-purple-200 bg-[var(--bg)] text-xs font-bold outline-none">
+                      <option value="الفصل الدراسي الأول">الفصل الأول</option>
+                      <option value="الفصل الدراسي الثاني">الفصل الثاني</option>
+                      <option value="الفصل الدراسي الثالث">الفصل الثالث</option>
+                      <option value="دروس خارجية عن الكتاب">دروس خارجية</option>
+                    </select>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={handleGenerateLesson}
+                    disabled={isGenerating || !aiTopic}
+                    className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black shadow-xs transition-all disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                    <span>توليد الدرس والأسئلة فوراً</span>
+                  </button>
+
+                  {generatedLesson && (
+                    <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-2xl space-y-2 text-xs animate-in fade-in">
+                      <div className="font-black text-purple-900">{generatedLesson.title}</div>
+                      <div className="text-gray-700 line-clamp-3">{generatedLesson.content}</div>
+                      <div className="flex justify-between items-center text-[10px] text-purple-700 font-bold pt-1">
+                        <span>({toIndianNumbers(generatedLesson.questions?.length || 0)}) أسئلة مقترحة</span>
+                        <button
+                          type="button"
+                          onClick={handleSaveLesson}
+                          className="bg-purple-600 text-white px-3 py-1 rounded-lg font-bold hover:bg-purple-700"
                         >
-                          <BookOpen size={16} />
-                        </button>
-                        <button 
-                          onClick={() => setLessonToDelete({ id: l.id, title: l.title })}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-all cursor-pointer"
-                          title="حذف الدرس"
-                        >
-                          <Trash2 size={16} />
+                          حفظ في المكتبة
                         </button>
                       </div>
                     </div>
-                  ))}
-                  {lessonsList.length === 0 && !loading && (
-                    <div className="text-center py-20 text-[var(--text-light)]">لا توجد دروس مضافة حالياً</div>
                   )}
                 </div>
               </div>
             </div>
+
+            {/* 3. مكتبة الدروس والأسئلة الشاملة (جميع الدروس والأسئلة مع إمكانية التعديل) */}
+            <div className="bg-[var(--card-bg)] rounded-3xl p-6 sm:p-8 border border-[var(--border)] shadow-md space-y-5">
+              <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[var(--border)]">
+                <div>
+                  <h3 className="text-lg font-black text-gray-900 flex items-center gap-2">
+                    <BookOpen size={22} className="text-blue-600" />
+                    <span>مكتبة الدروس والأسئلة الشاملة</span>
+                    <span className="bg-blue-50 text-blue-700 px-3 py-0.5 rounded-full text-xs font-black border border-blue-200">
+                      {toIndianNumbers(filteredAdminLessons.length)} درس
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 font-bold mt-0.5">
+                    جميع الدروس المحفوظة للمناهج والدروس المضافة مع بنوك الأسئلة كاملة وإمكانية التعديل المباشر
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchCustomLessons}
+                  className="px-3 py-1.5 rounded-xl border border-gray-200 hover:bg-gray-100 text-xs font-bold text-gray-700 flex items-center gap-1.5"
+                >
+                  <RefreshCw size={13} className={cn(loading && "animate-spin")} />
+                  <span>تحديث القائمة</span>
+                </button>
+              </div>
+
+              {/* أزرار تصفية الصفوف الدراسية */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setLessonGradeFilter("all")}
+                  className={cn(
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap cursor-pointer",
+                    lessonGradeFilter === "all"
+                      ? "bg-blue-600 text-white shadow-xs"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  )}
+                >
+                  جميع الصفوف ({toIndianNumbers(lessonsList.length)})
+                </button>
+                {[1, 2, 3, 4, 5, 6].map(g => {
+                  const count = lessonsList.filter(l => normalizeGrade(l.grade) === g).length;
+                  return (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => setLessonGradeFilter(g.toString())}
+                      className={cn(
+                        "px-3.5 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap cursor-pointer",
+                        lessonGradeFilter === g.toString()
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      )}
+                    >
+                      {getGradeLabel(g)} ({toIndianNumbers(count)})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* شريط البحث وفلترة الفصل */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2 relative">
+                  <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input 
+                    type="text" 
+                    placeholder="ابحث في عناوين ونصوص الدروس والأسئلة..."
+                    value={lessonAdminSearch}
+                    onChange={e => setLessonAdminSearch(e.target.value)}
+                    className="w-full pr-10 pl-4 py-2.5 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-bold outline-none focus:border-blue-500"
+                  />
+                </div>
+                <select
+                  value={lessonSemesterFilter}
+                  onChange={e => setLessonSemesterFilter(e.target.value)}
+                  className="px-3 py-2.5 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-bold outline-none focus:border-blue-500"
+                >
+                  <option value="all">جميع الفصول الدراسية</option>
+                  <option value="الفصل الدراسي الأول">الفصل الأول</option>
+                  <option value="الفصل الدراسي الثاني">الفصل الثاني</option>
+                  <option value="الفصل الدراسي الثالث">الفصل الثالث</option>
+                  <option value="دروس خارجية عن الكتاب">دروس خارجية</option>
+                </select>
+              </div>
+
+              {/* قائمة كروت الدروس مع الأسئلة وأزرار التعديل */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 max-h-[750px] overflow-y-auto p-1 scrollbar-thin">
+                {filteredAdminLessons.map(l => {
+                  const questionsCount = l.questions?.length || 0;
+                  const wordsCount = l.content ? l.content.trim().split(/\s+/).length : 0;
+                  const isCustomAdded = (l as any).isCustom || (l as any).authorId;
+
+                  return (
+                    <div 
+                      key={l.id || l.title}
+                      className="bg-[var(--bg)] p-4 rounded-2xl border border-[var(--border)] hover:border-blue-300 hover:shadow-xs transition-all flex flex-col justify-between gap-3 group"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <h4 className="font-black text-sm text-gray-900 leading-snug line-clamp-1" title={l.title}>
+                            {l.title}
+                          </h4>
+                          {isCustomAdded && (
+                            <span className="text-[9px] bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded-md font-bold shrink-0 border border-purple-200">
+                              مخصص
+                            </span>
+                          )}
+                        </div>
+
+                        {/* وسوم الصف والفصل والكلمات والأسئلة */}
+                        <div className="flex items-center flex-wrap gap-1.5 text-[10px]">
+                          <span className="bg-blue-50 text-blue-800 px-2 py-0.5 rounded-lg font-black border border-blue-100">
+                            {l.grade || "الصف الأول"}
+                          </span>
+                          <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-lg font-bold">
+                            {l.semester || "الفصل الأول"}
+                          </span>
+                          <span className="bg-amber-50 text-amber-800 px-2 py-0.5 rounded-lg font-black border border-amber-200 flex items-center gap-1">
+                            <HelpCircle size={10} />
+                            {toIndianNumbers(questionsCount)} أسئلة فهم
+                          </span>
+                          <span className="text-gray-400 font-bold">
+                            {toIndianNumbers(wordsCount)} كلمة
+                          </span>
+                        </div>
+
+                        {/* مقتطف من نص الدرس */}
+                        <p className="text-xs text-gray-500 font-normal line-clamp-2 leading-relaxed">
+                          {l.content}
+                        </p>
+                      </div>
+
+                      {/* أزرار المعاينة والتعديل والحذف */}
+                      <div className="flex items-center gap-1.5 pt-2 border-t border-gray-100 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setViewingLessonDetails(l)}
+                          className="flex-1 py-1.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
+                          title="معاينة النص والأسئلة"
+                        >
+                          <BookOpen size={13} />
+                          <span>معاينة</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setEditingLesson(JSON.parse(JSON.stringify(l)))}
+                          className="flex-1 py-1.5 px-2 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
+                          title="تعديل الدرس والأسئلة"
+                        >
+                          <Pencil size={13} />
+                          <span>تعديل</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setLessonToDelete({ id: l.id, title: l.title })}
+                          className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                          title="حذف الدرس"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {filteredAdminLessons.length === 0 && !loading && (
+                  <div className="col-span-full text-center py-16 text-gray-400 font-bold space-y-2">
+                    <BookOpen size={36} className="mx-auto text-gray-300" />
+                    <p>لا توجد دروس تطابق خيارات البحث الحالية</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
           </motion.div>
         )}
         {activeTab === "studentsDB" && (profile?.role === "general_supervisor" || profile?.role === "supervisor") && (
@@ -2752,6 +3157,295 @@ export default function Admin() {
               >
                 {isDeletingQuestion ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                 <span>تأكيد حذف السؤال</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة معاينة الدرس والأسئلة كاملة بدون أي اقتطاع */}
+      {viewingLessonDetails && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-gray-100 space-y-5 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2 text-blue-600">
+                <BookOpen size={20} />
+                <h3 className="text-lg font-black text-gray-900">{viewingLessonDetails.title}</h3>
+              </div>
+              <button
+                onClick={() => setViewingLessonDetails(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs flex-wrap">
+              <span className="bg-blue-50 text-blue-700 font-bold px-2.5 py-1 rounded-lg">
+                {viewingLessonDetails.grade}
+              </span>
+              <span className="bg-purple-50 text-purple-700 font-bold px-2.5 py-1 rounded-lg">
+                {viewingLessonDetails.semester || "الفصل الدراسي الأول"}
+              </span>
+              <span className="bg-gray-100 text-gray-700 font-bold px-2.5 py-1 rounded-lg">
+                {toIndianNumbers(viewingLessonDetails.content.trim().split(/\s+/).length)} كلمة
+              </span>
+              <span className="bg-amber-50 text-amber-700 font-bold px-2.5 py-1 rounded-lg">
+                {toIndianNumbers(viewingLessonDetails.questions?.length || 0)} أسئلة
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin">
+              <div>
+                <h4 className="text-xs font-black text-gray-500 mb-1.5">نص القراءة الكامل:</h4>
+                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 text-sm leading-loose whitespace-pre-line text-gray-800 font-normal">
+                  {viewingLessonDetails.content}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-black text-gray-500 mb-2">أسئلة الفهم المرتبطة بالنص:</h4>
+                {viewingLessonDetails.questions && viewingLessonDetails.questions.length > 0 ? (
+                  <div className="space-y-3">
+                    {viewingLessonDetails.questions.map((q, idx) => (
+                      <div key={idx} className="p-3.5 bg-blue-50/50 rounded-2xl border border-blue-100 space-y-2 text-xs">
+                        <div className="font-black text-blue-950">
+                          {toIndianNumbers(idx + 1)}. {q.text}
+                        </div>
+                        {q.options && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                            {q.options.map((opt, optIdx) => (
+                              <div
+                                key={optIdx}
+                                className={cn(
+                                  "px-3 py-1.5 rounded-xl border text-xs flex items-center justify-between",
+                                  optIdx === q.correct
+                                    ? "bg-emerald-100/70 border-emerald-300 text-emerald-900 font-black"
+                                    : "bg-white border-gray-200 text-gray-700"
+                                )}
+                              >
+                                <span>{opt}</span>
+                                {optIdx === q.correct && (
+                                  <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.2 rounded-md">
+                                    الإجابة الصحيحة
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 p-3 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center">
+                    لا توجد أسئلة مضافة لهذا الدرس حتى الآن.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setViewingLessonDetails(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100"
+              >
+                إغلاق
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingLesson(JSON.parse(JSON.stringify(viewingLessonDetails)));
+                  setViewingLessonDetails(null);
+                }}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Pencil size={13} />
+                <span>تعديل هذا الدرس والأسئلة</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة تعديل الدرس والأسئلة وحفظها في Firestore */}
+      {editingLesson && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-gray-100 space-y-4 animate-in fade-in zoom-in-95 max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2 text-amber-600">
+                <Pencil size={18} />
+                <h3 className="text-base font-black text-gray-900">تعديل الدرس: {editingLesson.title}</h3>
+              </div>
+              <button
+                onClick={() => setEditingLesson(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600">عنوان الدرس</label>
+                <input
+                  type="text"
+                  value={editingLesson.title}
+                  onChange={(e) => setEditingLesson({ ...editingLesson, title: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-bold outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-600">الصف الدراسي</label>
+                  <select
+                    value={normalizeGrade(editingLesson.grade) || 1}
+                    onChange={(e) => setEditingLesson({ ...editingLesson, grade: getGradeLabel(Number(e.target.value)) })}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-bold outline-none"
+                  >
+                    {[1, 2, 3, 4, 5, 6].map(g => (
+                      <option key={g} value={g}>{getGradeLabel(g)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-600">الفصل الدراسي</label>
+                  <select
+                    value={editingLesson.semester || "الفصل الدراسي الأول"}
+                    onChange={(e) => setEditingLesson({ ...editingLesson, semester: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs font-bold outline-none"
+                  >
+                    <option value="الفصل الدراسي الأول">الفصل الأول</option>
+                    <option value="الفصل الدراسي الثاني">الفصل الثاني</option>
+                    <option value="الفصل الدراسي الثالث">الفصل الثالث</option>
+                    <option value="دروس خارجية عن الكتاب">دروس خارجية</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600">نص القراءة (كاملًا دون اقتطاع)</label>
+                <textarea
+                  value={editingLesson.content}
+                  onChange={(e) => setEditingLesson({ ...editingLesson, content: e.target.value })}
+                  rows={6}
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-[var(--bg)] text-xs leading-relaxed outline-none focus:border-blue-500 font-normal"
+                />
+              </div>
+
+              {/* قسم الأسئلة */}
+              <div className="space-y-3 pt-2 border-t border-gray-100">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-gray-700">أسئلة الفهم والاستيعاب ({toIndianNumbers(editingLesson.questions?.length || 0)})</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextQ = editingLesson.questions ? [...editingLesson.questions] : [];
+                      nextQ.push({
+                        text: "",
+                        options: ["", "", "", ""],
+                        correct: 0,
+                        type: "multiple"
+                      });
+                      setEditingLesson({ ...editingLesson, questions: nextQ });
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1"
+                  >
+                    <Plus size={14} />
+                    <span>إضافة سؤال</span>
+                  </button>
+                </div>
+
+                {(!editingLesson.questions || editingLesson.questions.length === 0) ? (
+                  <p className="text-xs text-gray-400 text-center py-4 bg-gray-50 rounded-2xl border border-dashed">
+                    لا توجد أسئلة بعد. اضغط "إضافة سؤال" لإضافة أسئلة فهم مخصصة لهذا النص.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {editingLesson.questions.map((q, qIdx) => (
+                      <div key={qIdx} className="p-3.5 bg-gray-50 rounded-2xl border border-gray-200 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-black text-gray-700">سؤال {toIndianNumbers(qIdx + 1)}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextQ = editingLesson.questions!.filter((_, i) => i !== qIdx);
+                              setEditingLesson({ ...editingLesson, questions: nextQ });
+                            }}
+                            className="text-red-500 hover:text-red-700 p-1 text-xs"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="نص السؤال..."
+                          value={q.text}
+                          onChange={(e) => {
+                            const nextQ = [...editingLesson.questions!];
+                            nextQ[qIdx] = { ...nextQ[qIdx], text: e.target.value };
+                            setEditingLesson({ ...editingLesson, questions: nextQ });
+                          }}
+                          className="w-full px-3 py-1.5 rounded-xl border bg-white text-xs font-bold outline-none"
+                        />
+                        <div className="space-y-1">
+                          <span className="text-[10px] text-gray-500 font-bold">الخيارات (حدد الدائرة للخيار الصحيح):</span>
+                          {(q.options || ["", "", "", ""]).map((opt, optIdx) => (
+                            <div key={optIdx} className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                name={`q_correct_${qIdx}`}
+                                checked={q.correct === optIdx}
+                                onChange={() => {
+                                  const nextQ = [...editingLesson.questions!];
+                                  nextQ[qIdx] = { ...nextQ[qIdx], correct: optIdx };
+                                  setEditingLesson({ ...editingLesson, questions: nextQ });
+                                }}
+                                className="accent-blue-600"
+                              />
+                              <input
+                                type="text"
+                                placeholder={`الخيار ${toIndianNumbers(optIdx + 1)}`}
+                                value={opt}
+                                onChange={(e) => {
+                                  const nextQ = [...editingLesson.questions!];
+                                  const opts = [...(nextQ[qIdx].options || ["", "", "", ""])];
+                                  opts[optIdx] = e.target.value;
+                                  nextQ[qIdx] = { ...nextQ[qIdx], options: opts };
+                                  setEditingLesson({ ...editingLesson, questions: nextQ });
+                                }}
+                                className="flex-1 px-3 py-1 rounded-lg border bg-white text-xs outline-none"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setEditingLesson(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditedLesson}
+                disabled={loading}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {loading ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                <span>حفظ التعديلات في قاعدة البيانات</span>
               </button>
             </div>
           </div>
