@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
-import { UserProfile, Lesson, ReaderConfig, ReadingSession } from "./types";
-import { cn, toIndianNumbers, normalizeGrade, getGradeLabel, normalizeSemester } from "./utils";
+import { UserProfile, Lesson, ReaderConfig, ReadingSession, QuizResult } from "./types";
+import { cn, toIndianNumbers, normalizeGrade, getGradeLabel, normalizeSemester, getSavedReaderPreferences, saveReaderPreferences, ARABIC_FONTS, getFontFamilyById, ReaderPreferences } from "./utils";
 import { 
   Users, 
   BookOpen, 
@@ -21,9 +21,11 @@ import {
   UserCheck,
   ArrowUpDown,
   Zap,
-  X
+  X,
+  Award,
+  Star
 } from "lucide-react";
-import { collection, onSnapshot, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
+import { collection, onSnapshot, getDocs, query, where, doc, updateDoc, orderBy, limit } from "firebase/firestore";
 import { db } from "./firebase";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -41,43 +43,82 @@ export default function TeacherDashboard() {
     { label: "الصف السادس", num: 6 }
   ];
 
-  // Selected Grade state (default: teacher's assigned grade or Grade 6)
-  const [selectedGradeNum, setSelectedGradeNum] = useState<number>(() => {
-    if (profile?.grade) {
-      const g = normalizeGrade(profile.grade);
-      if (g) return g;
+  // Teacher's allowed grades strictly based on assignedClasses or profile.grade
+  const teacherAllowedGrades = useMemo(() => {
+    if (profile?.role !== "teacher") {
+      return [1, 2, 3, 4, 5, 6];
     }
-    const savedLocal = localStorage.getItem("teacher_assigned_grade_num");
-    if (savedLocal) return parseInt(savedLocal, 10);
+    const gradesSet = new Set<number>();
+    
+    // 1. Strictly from assignedClasses if configured (e.g. "1-أ", "2-ب", "3")
+    if (profile?.assignedClasses && Array.isArray(profile.assignedClasses) && profile.assignedClasses.length > 0) {
+      profile.assignedClasses.forEach(item => {
+        const rawGrade = item.includes("-") ? item.split("-")[0] : item;
+        const num = normalizeGrade(rawGrade);
+        if (num) gradesSet.add(num);
+      });
+    } else if (profile?.grade) {
+      // 2. Fallback to profile.grade only if no assignedClasses exist
+      const num = normalizeGrade(profile.grade);
+      if (num) gradesSet.add(num);
+    }
+    
+    // Fallback if not specified in DB: default to 1
+    if (gradesSet.size === 0) {
+      gradesSet.add(1);
+    }
+    
+    return Array.from(gradesSet).sort((a, b) => a - b);
+  }, [profile]);
+
+  // Selected Grade state (default: teacher's first assigned grade or Grade 1)
+  const [selectedGradeNum, setSelectedGradeNum] = useState<number>(() => {
+    if (profile?.role === "teacher") {
+      if (profile?.assignedClasses && profile.assignedClasses.length > 0) {
+        const first = profile.assignedClasses[0];
+        const num = normalizeGrade(first.includes("-") ? first.split("-")[0] : first);
+        if (num) return num;
+      }
+      if (profile?.grade) {
+        const num = normalizeGrade(profile.grade);
+        if (num) return num;
+      }
+      return 1;
+    }
     const saved = sessionStorage.getItem("teacher_selected_grade_num");
-    return saved ? parseInt(saved, 10) : 6;
+    return saved ? parseInt(saved, 10) : 1;
   });
 
   const [selectedSection, setSelectedSection] = useState<string>(() => {
     return sessionStorage.getItem("teacher_selected_section") || "الكل";
   });
 
-  // Selected student for training
-  const [selectedStudent, setSelectedStudent] = useState<UserProfile | null>(() => {
-    const saved = sessionStorage.getItem("teacher_selected_student");
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return null; }
-    }
-    return null;
-  });
+  // Selected student for training (must be chosen explicitly by teacher - no default selection)
+  const [selectedStudent, setSelectedStudent] = useState<UserProfile | null>(null);
+
+  // Evaluations states (student quizzes and teacher's supervisory visits)
+  const [studentQuizzes, setStudentQuizzes] = useState<QuizResult[]>([]);
+  const [supervisoryVisits, setSupervisoryVisits] = useState<any[]>([]);
+  const [showEvaluationsModal, setShowEvaluationsModal] = useState(false);
+  const [evalTab, setEvalTab] = useState<"students" | "supervisory">("students");
 
   // Tabs for lessons: "curriculum_1" | "curriculum_2" | "curriculum_3" | "external" | "all"
   const [lessonTab, setLessonTab] = useState<"curriculum_1" | "curriculum_2" | "curriculum_3" | "external" | "all">("curriculum_1");
   
-  // Reading mode preferred by teacher: "static" | "scroll" | "rsvp"
-  const [teacherReadingMode, setTeacherReadingMode] = useState<"static" | "scroll" | "rsvp">(() => {
-    return (sessionStorage.getItem("teacher_reading_mode") as any) || "static";
+  const initialTeacherPrefs = getSavedReaderPreferences();
+
+  // Reading mode preferred by teacher: "static" | "scroll" | "rsvp" | "disappearing"
+  const [teacherReadingMode, setTeacherReadingMode] = useState<"static" | "scroll" | "rsvp" | "disappearing">(() => {
+    return initialTeacherPrefs.mode || "static";
   });
 
-  // Modal to choose reading mode and speed before launching Reader
+  // Modal to choose reading mode, font and speed before launching Reader
   const [lessonForReadingModal, setLessonForReadingModal] = useState<Lesson | null>(null);
-  const [readingModeDraft, setReadingModeDraft] = useState<"static" | "scroll" | "rsvp">("static");
-  const [readingSpeedDraft, setReadingSpeedDraft] = useState<number>(150);
+  const [readingModeDraft, setReadingModeDraft] = useState<"static" | "scroll" | "rsvp" | "disappearing">(initialTeacherPrefs.mode || "static");
+  const [readingSpeedDraft, setReadingSpeedDraft] = useState<number>(initialTeacherPrefs.speed || 150);
+  const [readingFontDraft, setReadingFontDraft] = useState<"madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa">(initialTeacherPrefs.fontFamilyId || "madrasa");
+  const [readingFontSizeDraft, setReadingFontSizeDraft] = useState<number>(initialTeacherPrefs.fontSize || 36);
+  const [saveAsDefaultPrefs, setSaveAsDefaultPrefs] = useState<boolean>(true);
   
   // Searches
   const [studentSearch, setStudentSearch] = useState("");
@@ -104,6 +145,8 @@ export default function TeacherDashboard() {
   useEffect(() => {
     if (selectedStudent) {
       sessionStorage.setItem("teacher_selected_student", JSON.stringify(selectedStudent));
+    } else {
+      sessionStorage.removeItem("teacher_selected_student");
     }
   }, [selectedStudent]);
 
@@ -112,6 +155,7 @@ export default function TeacherDashboard() {
     let unsubscribeRoster: (() => void) | undefined;
     let unsubscribeUsers: (() => void) | undefined;
     let unsubscribeLessons: (() => void) | undefined;
+    let unsubscribeQuizzes: (() => void) | undefined;
 
     let rosterMap = new Map<string, UserProfile>();
     let usersMap = new Map<string, UserProfile>();
@@ -270,39 +314,147 @@ export default function TeacherDashboard() {
     };
     fetchTodaySessions();
 
+    // Real-time listener for student quiz evaluations
+    try {
+      unsubscribeQuizzes = onSnapshot(collection(db, "quiz_results"), (snapshot) => {
+        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as QuizResult));
+        list.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+        setStudentQuizzes(list);
+      }, (err) => {
+        console.error("quiz_results snapshot error:", err);
+      });
+    } catch (e) {
+      console.error("Failed to listen to quizzes:", e);
+    }
+
+    // Fetch supervisory visits for this teacher
+    const fetchVisits = async () => {
+      try {
+        const vSnap = await getDocs(query(collection(db, "supervisory_visits"), orderBy("date", "desc")));
+        const visitsList = vSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (profile?.uid) {
+          const filtered = visitsList.filter((v: any) => 
+            v.teacherId === profile.uid || 
+            (v.teacherName && profile.fullName && v.teacherName.trim() === profile.fullName.trim())
+          );
+          setSupervisoryVisits(filtered);
+        } else {
+          setSupervisoryVisits(visitsList);
+        }
+      } catch (e) {
+        console.error("Failed to fetch supervisory visits:", e);
+      }
+    };
+    fetchVisits();
+
     return () => {
       if (unsubscribeRoster) unsubscribeRoster();
       if (unsubscribeUsers) unsubscribeUsers();
       if (unsubscribeLessons) unsubscribeLessons();
+      if (unsubscribeQuizzes) unsubscribeQuizzes();
     };
-  }, []);
+  }, [profile]);
 
-  // Filter students based on selected grade and section
-  const filteredStudents = allStudents.filter(student => {
-    const studentGradeNum = normalizeGrade(student.grade);
-    const gradeMatch = studentGradeNum === selectedGradeNum;
-    const sectionMatch = selectedSection === "الكل" || student.section === selectedSection;
+  // Extract available sections for the currently selected grade (filtered to teacher's assigned sections if any)
+  const availableSections = useMemo(() => {
+    const rawSections = Array.from(
+      new Set(allStudents.filter(s => normalizeGrade(s.grade) === selectedGradeNum).map(s => s.section).filter(Boolean))
+    ) as string[];
 
-    const name = (student.fullName || student.username || "").toLowerCase();
-    const natId = String(student.nationalId || "").toLowerCase();
-    const searchMatch = !studentSearch || name.includes(studentSearch.toLowerCase()) || natId.includes(studentSearch.toLowerCase());
+    if (profile?.role === "teacher" && profile?.assignedClasses && profile.assignedClasses.length > 0) {
+      return rawSections.filter(sec => {
+        const classKey = `${selectedGradeNum}-${sec}`;
+        return profile.assignedClasses?.some(ac => 
+          ac === classKey || 
+          ac === selectedGradeNum.toString() ||
+          ac === getGradeLabel(selectedGradeNum)
+        );
+      });
+    }
+    return rawSections;
+  }, [allStudents, selectedGradeNum, profile]);
 
-    return gradeMatch && sectionMatch && searchMatch;
-  });
-
-  // Extract available sections for the currently selected grade
-  const availableSections = Array.from(
-    new Set(allStudents.filter(s => normalizeGrade(s.grade) === selectedGradeNum).map(s => s.section).filter(Boolean))
-  ) as string[];
-
-  // Keep selected student synced when grade changes
+  // Auto-select the teacher's single section if only one is available for this grade
   useEffect(() => {
-    if (filteredStudents.length > 0) {
-      if (!selectedStudent || normalizeGrade(selectedStudent.grade) !== selectedGradeNum) {
-        setSelectedStudent(filteredStudents[0]);
+    if (profile?.role === "teacher" && availableSections.length === 1) {
+      if (selectedSection !== availableSections[0]) {
+        setSelectedSection(availableSections[0]);
       }
     }
-  }, [selectedGradeNum, filteredStudents.length]);
+  }, [profile?.role, availableSections, selectedSection]);
+
+  // Filter students based on selected grade and section - strictly restricted to teacher's assigned classes
+  const filteredStudents = useMemo(() => {
+    return allStudents.filter(student => {
+      const studentGradeNum = normalizeGrade(student.grade);
+      const gradeMatch = studentGradeNum === selectedGradeNum;
+
+      // Strict teacher class & section restriction:
+      // Teachers ONLY see students belonging to their assigned classes/sections
+      if (profile?.role === "teacher" && profile?.assignedClasses && profile.assignedClasses.length > 0) {
+        const sSec = (student.section || "").trim();
+        const isAssigned = profile.assignedClasses.some(ac => {
+          const [rawG, rawS] = ac.includes("-") ? ac.split("-") : [ac, ""];
+          const acGradeNum = normalizeGrade(rawG);
+          if (acGradeNum !== studentGradeNum) return false;
+          if (rawS && rawS.trim()) {
+            return rawS.trim() === sSec;
+          }
+          return true;
+        });
+        if (!isAssigned) return false;
+      }
+
+      const sectionMatch = selectedSection === "الكل" || student.section === selectedSection;
+
+      const name = (student.fullName || student.username || "").toLowerCase();
+      const natId = String(student.nationalId || "").toLowerCase();
+      const searchMatch = !studentSearch || name.includes(studentSearch.toLowerCase()) || natId.includes(studentSearch.toLowerCase());
+
+      return gradeMatch && sectionMatch && searchMatch;
+    });
+  }, [allStudents, selectedGradeNum, selectedSection, studentSearch, profile]);
+
+  // Map of latest quiz evaluation by student ID
+  const latestQuizByStudentId = useMemo(() => {
+    const map = new Map<string, QuizResult>();
+    studentQuizzes.forEach(q => {
+      if (q.userId && !map.has(q.userId)) {
+        map.set(q.userId, q);
+      }
+    });
+    return map;
+  }, [studentQuizzes]);
+
+  // Keep teacher strictly on their assigned grades
+  useEffect(() => {
+    if (profile?.role === "teacher" && teacherAllowedGrades.length > 0) {
+      if (!teacherAllowedGrades.includes(selectedGradeNum)) {
+        setSelectedGradeNum(teacherAllowedGrades[0]);
+        setSelectedSection("الكل");
+      }
+    }
+  }, [teacherAllowedGrades, selectedGradeNum, profile?.role]);
+
+  // Reset student selection when grade or section changes, so no student is auto-selected and names never leak between classes
+  useEffect(() => {
+    setSelectedStudent(null);
+    sessionStorage.removeItem("teacher_selected_student");
+  }, [selectedGradeNum, selectedSection]);
+
+  // Ensure that if a student was selected, they strictly exist in the current grade/section list
+  useEffect(() => {
+    if (selectedStudent) {
+      const stillInList = filteredStudents.some(s => 
+        (s.uid && s.uid === selectedStudent.uid) || 
+        (s.nationalId && s.nationalId === selectedStudent.nationalId)
+      );
+      if (!stillInList) {
+        setSelectedStudent(null);
+        sessionStorage.removeItem("teacher_selected_student");
+      }
+    }
+  }, [filteredStudents, selectedStudent]);
 
   // Filter lessons based on:
   // 1) Grade (matches selectedGradeNum)
@@ -341,23 +493,43 @@ export default function TeacherDashboard() {
       alert("الرجاء اختيار طالب من القائمة الجانبية أولاً لبدء التدريب معه.");
       return;
     }
+    const currentPrefs = getSavedReaderPreferences();
+    setReadingModeDraft(currentPrefs.mode || "static");
+    setReadingSpeedDraft(currentPrefs.speed || 150);
+    setReadingFontDraft(currentPrefs.fontFamilyId || "madrasa");
+    setReadingFontSizeDraft(currentPrefs.fontSize || 36);
     setLessonForReadingModal(lesson);
-    setReadingModeDraft(teacherReadingMode);
   };
 
-  const handleConfirmStartSession = (modeToUse: "static" | "scroll" | "rsvp", speedToUse: number) => {
+  const handleConfirmStartSession = (
+    modeToUse: "static" | "scroll" | "rsvp" | "disappearing", 
+    speedToUse: number,
+    fontToUse: "madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa" = readingFontDraft,
+    fontSizeToUse: number = readingFontSizeDraft,
+    saveAsDefault: boolean = saveAsDefaultPrefs
+  ) => {
     if (!selectedStudent || !lessonForReadingModal) return;
 
     setTeacherReadingMode(modeToUse);
     sessionStorage.setItem("teacher_reading_mode", modeToUse);
 
+    if (saveAsDefault) {
+      saveReaderPreferences({
+        mode: modeToUse,
+        speed: speedToUse,
+        fontFamilyId: fontToUse,
+        fontSize: fontSizeToUse
+      });
+    }
+
     const config: ReaderConfig = {
       lessonId: lessonForReadingModal.id,
       speed: speedToUse,
       mode: modeToUse,
-      font: "Tajawal",
+      font: getFontFamilyById(fontToUse),
+      fontFamilyId: fontToUse,
       theme: "light",
-      fontSize: 34,
+      fontSize: fontSizeToUse,
       teacherMode: true,
       targetStudentId: selectedStudent.uid || selectedStudent.nationalId,
       targetStudentName: selectedStudent.fullName || selectedStudent.username
@@ -368,7 +540,7 @@ export default function TeacherDashboard() {
     navigate("/read");
   };
 
-  const handleStartSession = (lesson: Lesson, modeOverride?: "static" | "scroll" | "rsvp") => {
+  const handleStartSession = (lesson: Lesson, modeOverride?: "static" | "scroll" | "rsvp" | "disappearing") => {
     if (!selectedStudent) {
       alert("الرجاء اختيار طالب من القائمة الجانبية أولاً لبدء التدريب معه.");
       return;
@@ -379,15 +551,17 @@ export default function TeacherDashboard() {
       return;
     }
 
+    const currentPrefs = getSavedReaderPreferences();
     const mode = modeOverride;
 
     const config: ReaderConfig = {
       lessonId: lesson.id,
-      speed: 150,
+      speed: currentPrefs.speed || 150,
       mode: mode,
-      font: "Tajawal",
+      font: getFontFamilyById(currentPrefs.fontFamilyId),
+      fontFamilyId: currentPrefs.fontFamilyId,
       theme: "light",
-      fontSize: 34,
+      fontSize: currentPrefs.fontSize || 36,
       teacherMode: true,
       targetStudentId: selectedStudent.uid || selectedStudent.nationalId,
       targetStudentName: selectedStudent.fullName || selectedStudent.username
@@ -534,6 +708,39 @@ export default function TeacherDashboard() {
       ));
       const completedIds = Array.from(new Set(todaySnap.docs.map(d => d.data().userId as string)));
       setTodayCompletedStudentIds(completedIds);
+
+      // 5. Fetch quiz evaluations
+      try {
+        const qSnap = await getDocs(query(collection(db, "quiz_results"), orderBy("date", "desc"), limit(100)));
+        setStudentQuizzes(qSnap.docs.map(d => ({ id: d.id, ...d.data() } as QuizResult)));
+      } catch (err) {
+        try {
+          const qSnap = await getDocs(collection(db, "quiz_results"));
+          const list = qSnap.docs.map(d => ({ id: d.id, ...d.data() } as QuizResult));
+          list.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+          setStudentQuizzes(list);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // 6. Fetch supervisory visits
+      try {
+        const vSnap = await getDocs(query(collection(db, "supervisory_visits"), orderBy("date", "desc")));
+        const visitsList = vSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (profile?.uid) {
+          const filtered = visitsList.filter((v: any) => 
+            v.teacherId === profile.uid || 
+            (v.teacherName && profile.fullName && v.teacherName.trim() === profile.fullName.trim())
+          );
+          setSupervisoryVisits(filtered);
+        } else {
+          setSupervisoryVisits(visitsList);
+        }
+      } catch (e) {
+        // ignore
+      }
+
       setRefreshSuccess(true);
       setTimeout(() => setRefreshSuccess(false), 3000);
     } catch (error) {
@@ -560,34 +767,38 @@ export default function TeacherDashboard() {
         
         {/* الجزء الأيمن: اختيار الصف والشعبة في سطر مدمج */}
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
-          {/* الصفوف الدراسية: للمعلم يظهر صفه فقط، وللمشرف تظهر جميع الصفوف */}
+          {/* الصفوف الدراسية: للمعلم تظهر فقط الصفوف المحددة له، وللمشرف تظهر جميع الصفوف */}
           {profile?.role === "teacher" ? (
-            <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-xl text-xs font-black text-blue-900 shrink-0">
-              <GraduationCap size={15} className="text-blue-600" />
-              <span>{getGradeLabel(selectedGradeNum)}</span>
-              <select
-                value={selectedGradeNum}
-                onChange={async (e) => {
-                  const val = parseInt(e.target.value, 10);
-                  setSelectedGradeNum(val);
-                  setSelectedSection("الكل");
-                  localStorage.setItem("teacher_assigned_grade_num", val.toString());
-                  sessionStorage.setItem("teacher_selected_grade_num", val.toString());
-                  if (profile?.uid) {
-                    try {
-                      await updateDoc(doc(db, "users", profile.uid), { grade: val.toString() });
-                    } catch (err) {
-                      console.error("Could not update teacher grade:", err);
-                    }
-                  }
-                }}
-                className="bg-white border border-blue-200 text-blue-700 text-[10px] font-bold rounded-md px-1.5 py-0.5 outline-none cursor-pointer hover:border-blue-400"
-                title="تغيير صف التدريس المسند إليك"
-              >
-                {gradesList.map(g => (
-                  <option key={g.num} value={g.num}>تغيير الصف: {g.label}</option>
-                ))}
-              </select>
+            <div className="flex items-center gap-1 shrink-0">
+              {teacherAllowedGrades.length === 1 ? (
+                <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 px-3 py-1 rounded-xl text-xs font-black text-blue-900">
+                  <GraduationCap size={15} className="text-blue-600" />
+                  <span>{getGradeLabel(teacherAllowedGrades[0])}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-0.5 bg-gray-100 p-0.5 rounded-xl">
+                  {teacherAllowedGrades.map(gNum => {
+                    const isSelected = selectedGradeNum === gNum;
+                    return (
+                      <button
+                        key={gNum}
+                        onClick={() => {
+                          setSelectedGradeNum(gNum);
+                          setSelectedSection("الكل");
+                        }}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-xs font-black transition-all whitespace-nowrap",
+                          isSelected
+                            ? "bg-blue-600 text-white shadow-xs"
+                            : "text-gray-700 hover:text-blue-600 hover:bg-white/80"
+                        )}
+                      >
+                        {getGradeLabel(gNum)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-0.5 bg-gray-100 p-0.5 rounded-xl shrink-0">
@@ -683,11 +894,25 @@ export default function TeacherDashboard() {
         <div className="flex items-center gap-1.5 shrink-0">
           <button 
             onClick={() => navigate("/whiteboard")}
-            className="flex items-center gap-1 bg-gradient-to-r from-orange-500 to-amber-500 text-white px-2.5 py-1 rounded-xl font-black text-xs hover:shadow-xs transition-all active:scale-95"
+            className="flex items-center gap-1 bg-gradient-to-r from-orange-500 to-amber-500 text-white px-2.5 py-1 rounded-xl font-black text-xs hover:shadow-xs transition-all active:scale-95 cursor-pointer"
             title="السبورة الذكية التفاعلية"
           >
             <Presentation size={14} />
             <span>السبورة</span>
+          </button>
+
+          <button 
+            onClick={() => setShowEvaluationsModal(true)}
+            className="flex items-center gap-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 px-2.5 py-1 rounded-xl font-black text-xs hover:shadow-xs transition-all active:scale-95 shadow-2xs cursor-pointer"
+            title="عرض تقييمات الطلاب والزيارات الإشرافية"
+          >
+            <Award size={14} className="text-purple-600" />
+            <span>التقييمات</span>
+            {studentQuizzes.length > 0 && (
+              <span className="bg-purple-600 text-white text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                {toIndianNumbers(studentQuizzes.length)}
+              </span>
+            )}
           </button>
           
           <button 
@@ -764,7 +989,7 @@ export default function TeacherDashboard() {
                 return (
                   <div
                     key={student.uid || student.nationalId}
-                    onClick={() => setSelectedStudent(student)}
+                    onClick={() => setSelectedStudent(isSelected ? null : student)}
                     className={cn(
                       "p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-between group",
                       isSelected 
@@ -801,6 +1026,26 @@ export default function TeacherDashboard() {
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
+                      {(() => {
+                        const q = latestQuizByStudentId.get(student.uid || "") || (student.nationalId ? latestQuizByStudentId.get(student.nationalId) : undefined);
+                        if (!q) return null;
+                        const isExcellent = q.score >= 85;
+                        const isGood = q.score >= 70;
+                        const isAcceptable = q.score >= 50;
+                        return (
+                          <span
+                            className={cn(
+                              "text-[9px] font-black px-1.5 py-0.5 rounded-md border",
+                              isExcellent ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                              isGood ? "bg-blue-50 text-blue-700 border-blue-200" :
+                              isAcceptable ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-red-50 text-red-700 border-red-200"
+                            )}
+                            title={`آخر تقييم فهم: ${q.lessonTitle} (${q.score}%)`}
+                          >
+                            تقييم: {toIndianNumbers(q.score)}%
+                          </span>
+                        );
+                      })()}
                       {hasReadToday ? (
                         <span className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded-md" title="أكمل جلسة قراءة اليوم">
                           قرأ اليوم ✓
@@ -1150,35 +1395,35 @@ export default function TeacherDashboard() {
               {/* اختيار شكل القراءة */}
               <div className="space-y-2">
                 <label className="block text-xs font-black text-gray-800">اختر شكل القراءة المطلوب:</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() => setReadingModeDraft("static")}
                     className={cn(
-                      "p-3 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer",
+                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
                       readingModeDraft === "static"
-                        ? "bg-blue-50 border-blue-500 text-blue-700 shadow-xs ring-2 ring-blue-500/20"
-                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
+                        ? "bg-blue-50 border-blue-500 text-blue-700 shadow-xs ring-2 ring-blue-500/20 font-black"
+                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
                     )}
                   >
-                    <BookOpen size={20} className={readingModeDraft === "static" ? "text-blue-600" : "text-gray-400"} />
-                    <span className="text-xs font-black">📄 نص كامل</span>
-                    <span className="text-[9px] text-gray-400 font-bold">قراءة تقليدية</span>
+                    <BookOpen size={18} className={readingModeDraft === "static" ? "text-blue-600" : "text-gray-400"} />
+                    <span className="text-xs">📄 نص كامل</span>
+                    <span className="text-[9px] text-gray-400">قراءة تقليدية</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setReadingModeDraft("scroll")}
                     className={cn(
-                      "p-3 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer",
+                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
                       readingModeDraft === "scroll"
-                        ? "bg-blue-600 border-blue-600 text-white shadow-xs ring-2 ring-blue-600/20"
-                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
+                        ? "bg-blue-600 border-blue-600 text-white shadow-xs ring-2 ring-blue-600/20 font-black"
+                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
                     )}
                   >
-                    <ArrowUpDown size={20} className={readingModeDraft === "scroll" ? "text-white" : "text-gray-400"} />
-                    <span className="text-xs font-black">📜 انسيابي</span>
-                    <span className={cn("text-[9px] font-bold", readingModeDraft === "scroll" ? "text-blue-100" : "text-gray-400")}>
+                    <ArrowUpDown size={18} className={readingModeDraft === "scroll" ? "text-white" : "text-gray-400"} />
+                    <span className="text-xs">📜 انسيابي</span>
+                    <span className={cn("text-[9px]", readingModeDraft === "scroll" ? "text-blue-100" : "text-gray-400")}>
                       يصعد للأعلى
                     </span>
                   </button>
@@ -1187,61 +1432,351 @@ export default function TeacherDashboard() {
                     type="button"
                     onClick={() => setReadingModeDraft("rsvp")}
                     className={cn(
-                      "p-3 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer",
+                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
                       readingModeDraft === "rsvp"
-                        ? "bg-amber-500 border-amber-500 text-white shadow-xs ring-2 ring-amber-500/20"
-                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
+                        ? "bg-amber-500 border-amber-500 text-white shadow-xs ring-2 ring-amber-500/20 font-black"
+                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
                     )}
                   >
-                    <Zap size={20} className={readingModeDraft === "rsvp" ? "text-white" : "text-gray-400"} />
-                    <span className="text-xs font-black">⚡ كلمة كلمة</span>
-                    <span className={cn("text-[9px] font-bold", readingModeDraft === "rsvp" ? "text-amber-100" : "text-gray-400")}>
+                    <Zap size={18} className={readingModeDraft === "rsvp" ? "text-white" : "text-gray-400"} />
+                    <span className="text-xs">⚡ كلمة كلمة</span>
+                    <span className={cn("text-[9px]", readingModeDraft === "rsvp" ? "text-amber-100" : "text-gray-400")}>
                       وميض سريع
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReadingModeDraft("disappearing")}
+                    className={cn(
+                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
+                      readingModeDraft === "disappearing"
+                        ? "bg-purple-600 border-purple-600 text-white shadow-xs ring-2 ring-purple-500/20 font-black"
+                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
+                    )}
+                  >
+                    <Sparkles size={18} className={readingModeDraft === "disappearing" ? "text-white" : "text-gray-400"} />
+                    <span className="text-xs">✨ ظهور واختفاء</span>
+                    <span className={cn("text-[9px]", readingModeDraft === "disappearing" ? "text-purple-100" : "text-gray-400")}>
+                      تظهر الكلمات وتختفي
                     </span>
                   </button>
                 </div>
               </div>
 
-              {/* اختيار سرعة القراءة */}
-              <div className="space-y-2 pt-1">
+              {/* اختيار نوع الخط العربي الافتراضي */}
+              <div className="space-y-1.5 pt-1">
                 <div className="flex justify-between items-center">
-                  <label className="text-xs font-black text-gray-800">سرعة القراءة:</label>
-                  <span className="text-xs font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
-                    {toIndianNumbers(readingSpeedDraft)} كلمة / دقيقة
+                  <label className="text-xs font-black text-gray-800">نوع الخط الافتراضي:</label>
+                  <span className="text-xs font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                    {ARABIC_FONTS.find(f => f.id === readingFontDraft)?.label || "مدرسي"}
                   </span>
                 </div>
-                <input 
-                  type="range"
-                  min="30"
-                  max="350"
-                  step="10"
-                  value={readingSpeedDraft}
-                  onChange={(e) => setReadingSpeedDraft(parseInt(e.target.value, 10))}
-                  className="w-full accent-blue-600 cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] text-gray-400 font-bold">
-                  <span>٣٠ (مبتدئ)</span>
-                  <span>١٥٠ (متوسط)</span>
-                  <span>٣٥٠ (سريع)</span>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {ARABIC_FONTS.map(font => {
+                    const isSelected = readingFontDraft === font.id;
+                    return (
+                      <button
+                        type="button"
+                        key={font.id}
+                        onClick={() => setReadingFontDraft(font.id as any)}
+                        className={cn(
+                          "py-2 px-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5",
+                          isSelected
+                            ? "bg-blue-600 text-white border-blue-600 shadow-2xs font-black"
+                            : "bg-gray-50 hover:bg-gray-100 text-gray-700 border-gray-200 font-bold"
+                        )}
+                      >
+                        <span className="text-[11px]">{font.label}</span>
+                        <span 
+                          style={{ fontFamily: font.family }} 
+                          className={cn("text-[10px] truncate max-w-full", isSelected ? "text-white" : "text-gray-400")}
+                        >
+                          أبجد
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
+
+              {/* حجم الخط وسرعة القراءة */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {/* حجم الخط */}
+                <div className="space-y-1.5 bg-gray-50 p-2.5 rounded-2xl border border-gray-100">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-black text-gray-700">حجم الخط:</span>
+                    <span className="font-black text-blue-700">{toIndianNumbers(readingFontSizeDraft)} نقطة</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setReadingFontSizeDraft(prev => Math.max(20, prev - 2))}
+                      className="flex-1 py-1 bg-white hover:bg-gray-200 rounded-lg text-xs font-black border border-gray-200 cursor-pointer"
+                    >
+                      - تصغير
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReadingFontSizeDraft(prev => Math.min(64, prev + 2))}
+                      className="flex-1 py-1 bg-white hover:bg-gray-200 rounded-lg text-xs font-black border border-gray-200 cursor-pointer"
+                    >
+                      + تكبير
+                    </button>
+                  </div>
+                </div>
+
+                {/* سرعة القراءة */}
+                <div className="space-y-1.5 bg-gray-50 p-2.5 rounded-2xl border border-gray-100">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-black text-gray-700">سرعة القراءة:</span>
+                    <span className="font-black text-amber-700">{toIndianNumbers(readingSpeedDraft)} ك/د</span>
+                  </div>
+                  <input 
+                    type="range"
+                    min="30"
+                    max="350"
+                    step="10"
+                    value={readingSpeedDraft}
+                    onChange={(e) => setReadingSpeedDraft(parseInt(e.target.value, 10))}
+                    className="w-full accent-amber-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* خيار الحفظ كإعدادات افتراضية دائمة */}
+              <label className="flex items-center gap-2 p-2 bg-blue-50/60 rounded-xl border border-blue-100 cursor-pointer text-xs font-bold text-blue-900 select-none">
+                <input 
+                  type="checkbox"
+                  checked={saveAsDefaultPrefs}
+                  onChange={(e) => setSaveAsDefaultPrefs(e.target.checked)}
+                  className="rounded accent-blue-600 w-4 h-4 cursor-pointer"
+                />
+                <span>تثبيت كإعدادات افتراضية دائمة للجلسات القادمة (لا تتغير إلا عند تعديلها)</span>
+              </label>
 
               {/* أزرار الإجراء */}
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
                 <button
                   type="button"
                   onClick={() => setLessonForReadingModal(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-100"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-100 cursor-pointer"
                 >
                   إلغاء
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleConfirmStartSession(readingModeDraft, readingSpeedDraft)}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                  onClick={() => handleConfirmStartSession(readingModeDraft, readingSpeedDraft, readingFontDraft, readingFontSizeDraft, saveAsDefaultPrefs)}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md transition-all flex items-center gap-1.5 cursor-pointer hover:scale-105 active:scale-95"
                 >
                   <PlayCircle size={15} />
                   <span>بدء القراءة الآن</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* نافذة التقييمات الشاملة: تقييمات قراءة الطلاب وزيارات المشرف التربوي */}
+      <AnimatePresence>
+        {showEvaluationsModal && (
+          <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl max-w-3xl w-full max-h-[88vh] flex flex-col shadow-2xl border border-gray-100 overflow-hidden font-tajawal rtl"
+              dir="rtl"
+            >
+              {/* ترويسة نافذة التقييمات */}
+              <div className="p-4 sm:p-5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-l from-purple-50/60 to-white">
+                <div className="flex items-center gap-2.5 text-purple-800">
+                  <div className="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center">
+                    <Award size={20} className="text-purple-700" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-gray-900">سجل التقييمات والنتائج</h3>
+                    <p className="text-[11px] text-gray-500 font-bold">تقييمات الفهم القرائي للطلاب والزيارات الإشرافية</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowEvaluationsModal(false)}
+                  className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* تبويبات التقييمات */}
+              <div className="flex items-center gap-2 px-5 pt-3 border-b border-gray-100 bg-gray-50/40">
+                <button
+                  onClick={() => setEvalTab("students")}
+                  className={cn(
+                    "pb-2.5 px-3 text-xs font-black transition-all border-b-2 flex items-center gap-1.5 cursor-pointer",
+                    evalTab === "students"
+                      ? "border-purple-600 text-purple-800"
+                      : "border-transparent text-gray-500 hover:text-gray-800"
+                  )}
+                >
+                  <BookOpen size={14} />
+                  <span>تقييمات فهم الطلاب ({toIndianNumbers(studentQuizzes.length)})</span>
+                </button>
+                <button
+                  onClick={() => setEvalTab("supervisory")}
+                  className={cn(
+                    "pb-2.5 px-3 text-xs font-black transition-all border-b-2 flex items-center gap-1.5 cursor-pointer",
+                    evalTab === "supervisory"
+                      ? "border-purple-600 text-purple-800"
+                      : "border-transparent text-gray-500 hover:text-gray-800"
+                  )}
+                >
+                  <Star size={14} />
+                  <span>تقييمات الزيارات الإشرافية ({toIndianNumbers(supervisoryVisits.length)})</span>
+                </button>
+              </div>
+
+              {/* محتوى التبويب المختار */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 scrollbar-thin">
+                {evalTab === "students" ? (
+                  studentQuizzes.length === 0 ? (
+                    <div className="text-center py-14 bg-gray-50 rounded-2xl border border-dashed border-gray-200 space-y-2">
+                      <Award size={32} className="mx-auto text-gray-300" />
+                      <p className="text-xs font-black text-gray-700">لا توجد نتائج تقييمات مسجلة بعد</p>
+                      <p className="text-[11px] text-gray-400">ستظهر هنا نتائج إجابة الطلاب على أسئلة الفهم القرائي فور إتمامها.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {studentQuizzes.map((quiz, i) => {
+                        const isExcellent = quiz.score >= 85;
+                        const isGood = quiz.score >= 70;
+                        const isAcceptable = quiz.score >= 50;
+                        const ratingText = isExcellent ? "ممتاز" : isGood ? "جيد جداً" : isAcceptable ? "مقبول" : "يحتاج متابعة";
+
+                        return (
+                          <div
+                            key={quiz.id || i}
+                            className="p-3 bg-white hover:bg-gray-50/80 rounded-2xl border border-gray-100 shadow-2xs flex items-center justify-between gap-3 transition-all"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0",
+                                isExcellent ? "bg-emerald-100 text-emerald-800" :
+                                isGood ? "bg-blue-100 text-blue-800" :
+                                isAcceptable ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800"
+                              )}>
+                                {toIndianNumbers(quiz.score)}%
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-black text-xs text-gray-900">{quiz.username || "طالب"}</span>
+                                  <span className={cn(
+                                    "text-[9px] font-black px-1.5 py-0.2 rounded-md",
+                                    isExcellent ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                                    isGood ? "bg-blue-50 text-blue-700 border border-blue-200" :
+                                    isAcceptable ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-red-50 text-red-700 border-red-200"
+                                  )}>
+                                    {ratingText}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-gray-500 font-bold mt-0.5">
+                                  درس: <span className="text-gray-800">{quiz.lessonTitle}</span>
+                                  <span className="mx-1.5 text-gray-300">•</span>
+                                  <span>{toIndianNumbers(quiz.correctAnswers)} من {toIndianNumbers(quiz.totalQuestions)} أسئلة</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-gray-400 font-bold hidden sm:inline">
+                                {new Date(quiz.date).toLocaleDateString("ar-SA")}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  setShowEvaluationsModal(false);
+                                  navigate("/reports", {
+                                    state: {
+                                      userId: quiz.userId,
+                                      targetUserId: quiz.userId,
+                                      username: quiz.username
+                                    }
+                                  });
+                                }}
+                                className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                                title="عرض تقرير الطالب الكامل"
+                              >
+                                <FileText size={12} />
+                                <span>التقرير</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : (
+                  supervisoryVisits.length === 0 ? (
+                    <div className="text-center py-14 bg-gray-50 rounded-2xl border border-dashed border-gray-200 space-y-2">
+                      <Star size={32} className="mx-auto text-gray-300" />
+                      <p className="text-xs font-black text-gray-700">لا توجد زيارات إشرافية مسجلة بعد</p>
+                      <p className="text-[11px] text-gray-400">ستظهر هنا تقييمات المشرف التربوي وملاحظاته عند تسجيل أي زيارة.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {supervisoryVisits.map((v, i) => (
+                        <div
+                          key={v.id || i}
+                          className="p-4 bg-white rounded-2xl border border-gray-200 shadow-2xs space-y-2.5"
+                        >
+                          <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center text-amber-500 gap-0.5">
+                                {[1, 2, 3, 4, 5].map(star => (
+                                  <Star
+                                    key={star}
+                                    size={14}
+                                    fill={star <= (v.rating || 0) ? "currentColor" : "none"}
+                                    className={star <= (v.rating || 0) ? "text-amber-500" : "text-gray-300"}
+                                  />
+                                ))}
+                              </div>
+                              <span className="text-xs font-black text-gray-800">
+                                تقييم: {toIndianNumbers(v.rating || 0)} من ٥
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-gray-400 font-bold">
+                              {new Date(v.date).toLocaleDateString("ar-SA")}
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-gray-700 leading-relaxed font-normal bg-gray-50 p-3 rounded-xl border border-gray-100">
+                            <span className="font-bold text-gray-900 block mb-1">ملاحظات وتوجيهات المشرف:</span>
+                            {v.notes || "لا توجد ملاحظات مدونة"}
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1 text-[11px] text-gray-500 font-bold">
+                            <span>المشرف التربوي: <strong className="text-gray-900">{v.supervisorName || "مشرف النظام"}</strong></span>
+                            {v.supervisorSignature && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-gray-400">التوقيع:</span>
+                                <img src={v.supervisorSignature} alt="توقيع المشرف" className="h-6 object-contain" />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+              </div>
+
+              {/* زر إغلاق */}
+              <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-end">
+                <button
+                  onClick={() => setShowEvaluationsModal(false)}
+                  className="px-5 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-black transition-all cursor-pointer"
+                >
+                  إغلاق
                 </button>
               </div>
             </motion.div>

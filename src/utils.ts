@@ -126,3 +126,54 @@ export function isGradeMatch(studentGrade: any, lessonGrade: any): boolean {
   if (!sNum || !lNum) return true;
   return sNum === lNum;
 }
+
+export interface ReaderPreferences {
+  fontSize: number; // e.g. 36
+  fontFamilyId: "madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa";
+  lineHeight: number; // e.g. 2.0
+  speed: number; // e.g. 150
+  mode: "static" | "scroll" | "rsvp" | "disappearing";
+}
+
+export const ARABIC_FONTS = [
+  { id: "madrasa", label: "مدرسي", family: "'Cairo', 'Noto Naskh Arabic', sans-serif", preview: "الخط المدرسي" },
+  { id: "naskh", label: "نسخ", family: "'Noto Naskh Arabic', serif", preview: "خط النسخ" },
+  { id: "cairo", label: "قاهري", family: "'Cairo', sans-serif", preview: "خط قاهري" },
+  { id: "amiri", label: "أميري", family: "'Amiri', serif", preview: "خط أميري" },
+  { id: "ruqaa", label: "رقعة", family: "'Aref Ruqaa', cursive", preview: "خط الرقعة" }
+] as const;
+
+export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
+  fontSize: 36,
+  fontFamilyId: "madrasa",
+  lineHeight: 2.0,
+  speed: 150,
+  mode: "static"
+};
+
+export function getSavedReaderPreferences(): ReaderPreferences {
+  try {
+    const raw = localStorage.getItem("app_reader_preferences");
+    if (!raw) return DEFAULT_READER_PREFERENCES;
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_READER_PREFERENCES, ...parsed };
+  } catch {
+    return DEFAULT_READER_PREFERENCES;
+  }
+}
+
+export function saveReaderPreferences(prefs: Partial<ReaderPreferences>): ReaderPreferences {
+  try {
+    const current = getSavedReaderPreferences();
+    const updated = { ...current, ...prefs };
+    localStorage.setItem("app_reader_preferences", JSON.stringify(updated));
+    return updated;
+  } catch {
+    return DEFAULT_READER_PREFERENCES;
+  }
+}
+
+export function getFontFamilyById(id?: string): string {
+  const found = ARABIC_FONTS.find(f => f.id === id);
+  return found ? found.family : "'Cairo', sans-serif";
+}

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { QuizQuestion, QuizResult, ReadingSession } from "./types";
 import { cn, toIndianNumbers, formatTime } from "./utils";
-import { HelpCircle, ArrowRight, ArrowLeft, CheckCircle, XCircle, Trophy, ThumbsUp, Target, Clock, AlertTriangle, Home, BookOpen, Loader2 } from "lucide-react";
+import { HelpCircle, ArrowRight, ArrowLeft, CheckCircle, XCircle, Trophy, ThumbsUp, Target, Clock, AlertTriangle, Home, BookOpen, Loader2, RotateCcw, X } from "lucide-react";
 import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { updateUserStats } from "./stats";
@@ -21,6 +21,8 @@ export default function Quiz() {
   const [correctCount, setCorrectCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showError, setShowError] = useState(false);
+  const [showPracticeModal, setShowPracticeModal] = useState(false);
+  const [practiceWordIdx, setPracticeWordIdx] = useState(0);
 
   useEffect(() => {
     const savedSession = sessionStorage.getItem("currentReadingSession");
@@ -69,8 +71,43 @@ export default function Quiz() {
         }
       }
 
-      setQuestions(qList);
-      setUserAnswers(new Array(qList.length).fill(null));
+      // تصنيف الأسئلة عشوائياً ومتدرجة من السهل إلى الصعب
+      const getDifficultyTier = (q: QuizQuestion): { tier: number; label: string } => {
+        if (q.difficulty === "easy" || q.difficulty === 1) return { tier: 1, label: "مستوى مباشر (سهل)" };
+        if (q.difficulty === "medium" || q.difficulty === 2) return { tier: 2, label: "مستوى فهم واستنتاج (متوسط)" };
+        if (q.difficulty === "hard" || q.difficulty === 3) return { tier: 3, label: "مستوى تفكير وتحليل (متقدم)" };
+
+        const text = q.text || "";
+        // أسئلة مباشرة: استرجاع حقائق وأسماء
+        if (/^(من|أين|متى|ما اسم|كم|هل|اذكر)\b/.test(text.trim())) {
+          return { tier: 1, label: "مستوى مباشر (سهل)" };
+        }
+        // أسئلة عميقة: الفكرة، العبرة، استنتاج
+        if (/(الفكرة الرئيس|العبرة|الهدف|استنتج|رأيك|الدرس المستفاد|مغزى|دلالة)/.test(text)) {
+          return { tier: 3, label: "مستوى تفكير وتحليل (متقدم)" };
+        }
+        // أسئلة فهم وتفسير وترتيب
+        return { tier: 2, label: "مستوى فهم واستنتاج (متوسط)" };
+      };
+
+      // خلط عشوائي للعناصر
+      const shuffle = <T,>(arr: T[]): T[] => {
+        const copy = [...arr];
+        for (let i = copy.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+      };
+
+      const easyList = shuffle(qList.filter(q => getDifficultyTier(q).tier === 1).map(q => ({ ...q, difficultyLabel: getDifficultyTier(q).label })));
+      const mediumList = shuffle(qList.filter(q => getDifficultyTier(q).tier === 2).map(q => ({ ...q, difficultyLabel: getDifficultyTier(q).label })));
+      const hardList = shuffle(qList.filter(q => getDifficultyTier(q).tier === 3).map(q => ({ ...q, difficultyLabel: getDifficultyTier(q).label })));
+
+      const finalGraduatedList = [...easyList, ...mediumList, ...hardList];
+
+      setQuestions(finalGraduatedList);
+      setUserAnswers(new Array(finalGraduatedList.length).fill(null));
       setLoading(false);
     };
 
@@ -195,7 +232,23 @@ export default function Quiz() {
           </div>
 
           <div className="bg-[var(--card-bg)] rounded-[var(--radius-md)] p-6 border border-[var(--border)] shadow-lg space-y-6">
-            <div className="text-lg font-bold leading-relaxed">{currentIndex + 1}. {currentQuestion.text}</div>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="text-base sm:text-lg font-black leading-relaxed text-gray-900">
+                {currentIndex + 1}. {currentQuestion.text}
+              </div>
+              {currentQuestion.difficultyLabel && (
+                <span className={cn(
+                  "text-[10px] font-black px-2.5 py-1 rounded-full border shrink-0",
+                  currentQuestion.difficultyLabel.includes("سهل") || currentQuestion.difficultyLabel.includes("مباشر")
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                  currentQuestion.difficultyLabel.includes("متوسط") || currentQuestion.difficultyLabel.includes("فهم")
+                    ? "bg-blue-50 text-blue-700 border-blue-200" :
+                    "bg-purple-50 text-purple-700 border-purple-200"
+                )}>
+                  {currentQuestion.difficultyLabel}
+                </span>
+              )}
+            </div>
 
             {currentQuestion.type === "multiple" ? (
               <div className="grid grid-cols-1 gap-3">
@@ -285,6 +338,45 @@ export default function Quiz() {
             <div className="flex items-center gap-2 text-sm font-bold"><span className="w-4 h-4 rounded-full bg-[var(--border)]"></span> {toIndianNumbers(questions.length - correctCount)} خطأ</div>
           </div>
 
+          {/* الكلمات التي أخطأ فيها الطالب لإعادة قراءتها وتثبيتها */}
+          {session?.errorWords && session.errorWords.length > 0 && (
+            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 sm:p-5 text-right space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 text-amber-900 font-black text-sm">
+                  <AlertTriangle size={18} className="text-amber-600" />
+                  <span>كلمات تعثر فيها الطالب ({toIndianNumbers(session.errorWords.length)} كلمات)</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setPracticeWordIdx(0);
+                    setShowPracticeModal(true);
+                  }}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                >
+                  <RotateCcw size={14} />
+                  <span>بدء إعادة القراءة والتدريب</span>
+                </button>
+              </div>
+              <p className="text-xs text-gray-600 font-bold">
+                اضغط على أي كلمة لإعادة قراءتها في بطاقة تدريبية مكبرة حتى يتقنها الطالب:
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {session.errorWords.map((word, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setPracticeWordIdx(i);
+                      setShowPracticeModal(true);
+                    }}
+                    className="bg-white hover:bg-red-50 text-red-700 border border-red-200 hover:border-red-300 px-3 py-1 rounded-xl text-xs font-black shadow-2xs transition-all cursor-pointer"
+                  >
+                    {word}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-4 pt-8 border-t border-[var(--border)]">
             {session && (session.userId !== user?.uid || profile?.role === "teacher") && (
               <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2">
@@ -302,6 +394,59 @@ export default function Quiz() {
             >
               {profile?.role === "teacher" ? `عرض سجل وتقارير الطالب (${session?.username})` : "عرض تقاريري"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة إعادة قراءة الكلمات المتعثرة */}
+      {showPracticeModal && session?.errorWords && session.errorWords.length > 0 && (
+        <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center shadow-2xl border border-gray-100 space-y-5 animate-in zoom-in duration-200">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <span className="text-xs font-black text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
+                تدريب الكلمة {toIndianNumbers(practiceWordIdx + 1)} من {toIndianNumbers(session.errorWords.length)}
+              </span>
+              <button 
+                onClick={() => setShowPracticeModal(false)} 
+                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="py-8 bg-amber-50/50 rounded-2xl border border-amber-100">
+              <div className="text-4xl sm:text-5xl font-black text-gray-900 select-none tracking-wide font-naskh">
+                {session.errorWords[practiceWordIdx]}
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-500 font-bold">
+              اقرأ الكلمة بصوت واضح مع مراعاة الحركات ومخارج الحروف
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                disabled={practiceWordIdx === 0}
+                onClick={() => setPracticeWordIdx(p => Math.max(0, p - 1))}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-black transition-all disabled:opacity-40 cursor-pointer"
+              >
+                السابق
+              </button>
+              <button
+                onClick={() => {
+                  if (practiceWordIdx < session.errorWords.length - 1) {
+                    setPracticeWordIdx(p => p + 1);
+                  } else {
+                    setShowPracticeModal(false);
+                    alert("أحسنت! تم تدريب وإعادة قراءة جميع الكلمات المتعثرة بنجاح 🌟");
+                  }
+                }}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <CheckCircle size={15} />
+                <span>{practiceWordIdx < session.errorWords.length - 1 ? "أتقنتها، التالي" : "أتقنت جميع الكلمات ✓"}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

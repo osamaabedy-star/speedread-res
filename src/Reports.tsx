@@ -91,157 +91,201 @@ export default function Reports() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]"><Loader2 className="animate-spin text-[var(--primary)]" size={48} /></div>;
 
   return (
-    <div className="space-y-8 mt-8">
-      <div className="bg-[var(--card-bg)] rounded-[var(--radius-lg)] p-6 border border-[var(--border)] shadow-md flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-3 text-[var(--primary)] font-bold">
-          <ChartLine size={28} />
-          <h2 className="text-2xl font-bold">{targetUsername ? `تقارير الطالب: ${targetUsername}` : "تقاريري"}</h2>
+    <div className="space-y-2.5 max-w-5xl mx-auto pb-8 font-tajawal rtl px-2 sm:px-0" dir="rtl">
+      {/* 1. الشريط العلوي المصغر */}
+      <div className="bg-[var(--card-bg)] rounded-xl px-3 py-2 border border-[var(--border)] shadow-2xs flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 text-[var(--primary)] font-bold">
+          <ChartLine size={16} />
+          <h2 className="text-sm sm:text-base font-black text-gray-900">{targetUsername ? `تقرير الطالب: ${targetUsername}` : "تقاريري"}</h2>
         </div>
-        <div className="flex gap-4">
-          <button onClick={() => navigate("/")} className="bg-[var(--bg)] text-[var(--text)] px-6 py-2 rounded-full font-bold border border-[var(--border)] hover:bg-gray-100 transition-all">الرئيسية</button>
+        <div className="flex gap-1.5">
+          <button 
+            onClick={() => navigate(profile?.role === "teacher" ? "/teacher" : "/")} 
+            className="bg-[var(--bg)] text-[var(--text)] px-3 py-1 rounded-lg text-xs font-bold border border-[var(--border)] hover:bg-gray-100 transition-all cursor-pointer"
+          >
+            {profile?.role === "teacher" ? "لوحة المعلم" : "الرئيسية"}
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 2. مربعات الإحصاءات المصغرة والمدمجة في شريط أنيق */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {[
-          { icon: BookOpen, label: "عدد الدروس المقروءة", value: toIndianNumbers(totalSessions) },
+          { icon: BookOpen, label: "الدروس المقروءة", value: toIndianNumbers(totalSessions) },
           { icon: Zap, label: "متوسط السرعة (ك/د)", value: toIndianNumbers(avgSpeed) },
           { icon: Percent, label: "متوسط درجة الفهم", value: toIndianNumbers(avgScore) + "%" },
           { icon: Clock, label: "إجمالي وقت القراءة", value: toIndianNumbers(Math.round(totalReadingTime / 60)) + " د" }
         ].map((s, i) => (
-          <div key={i} className="bg-[var(--card-bg)] rounded-[var(--radius-md)] p-4 border border-[var(--border)] shadow-sm text-center space-y-2 hover:-translate-y-1 transition-all">
-            <div className="w-8 h-8 bg-primary/10 text-[var(--primary)] rounded-full flex items-center justify-center mx-auto"><s.icon size={16} /></div>
-            <div className="text-xl font-black text-[var(--primary-dark)] tabular-nums">{s.value}</div>
-            <div className="text-[10px] text-[var(--text-light)] font-bold">{s.label}</div>
+          <div key={i} className="bg-[var(--card-bg)] rounded-xl p-2 border border-[var(--border)] shadow-2xs flex items-center gap-2 hover:shadow-xs transition-all">
+            <div className="w-6 h-6 bg-primary/10 text-[var(--primary)] rounded-lg flex items-center justify-center shrink-0">
+              <s.icon size={12} />
+            </div>
+            <div className="overflow-hidden min-w-0">
+              <div className="text-sm font-black text-[var(--primary-dark)] tabular-nums leading-tight truncate">
+                {s.value}
+              </div>
+              <div className="text-[9px] text-[var(--text-light)] font-bold truncate">{s.label}</div>
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-[var(--card-bg)] rounded-[var(--radius-md)] p-8 border border-[var(--border)] shadow-md space-y-6">
-          <h3 className="text-lg font-bold text-[var(--primary)] flex items-center gap-2"><ChartLine size={20} /> تطور سرعة القراءة</h3>
-          <div className="h-[300px] w-full">
+      {/* 3. مربعات الرسوم البيانية المصغرة */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+        {/* مربع سرعة القراءة المصغر */}
+        <div className="bg-[var(--card-bg)] rounded-xl p-2.5 sm:p-3 border border-[var(--border)] shadow-2xs space-y-1.5">
+          <h3 className="text-xs font-black text-[var(--primary)] flex items-center gap-1.5">
+            <ChartLine size={14} />
+            <span>تطور سرعة القراءة</span>
+          </h3>
+          <div className="h-[120px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={speedChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+              <LineChart data={speedChartData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.6} />
                 <XAxis dataKey="name" hide />
-                <YAxis stroke="var(--text-light)" fontSize={12} />
-                <Tooltip contentStyle={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: "12px" }} />
-                <Line type="monotone" dataKey="speed" stroke="var(--primary)" strokeWidth={3} dot={{ r: 4, fill: "var(--primary)" }} activeDot={{ r: 6 }} />
+                <YAxis stroke="var(--text-light)" fontSize={10} />
+                <Tooltip contentStyle={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "10px", padding: "4px 8px" }} />
+                <Line type="monotone" dataKey="speed" stroke="var(--primary)" strokeWidth={2} dot={{ r: 2.5, fill: "var(--primary)" }} activeDot={{ r: 4 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="bg-[var(--card-bg)] rounded-[var(--radius-md)] p-8 border border-[var(--border)] shadow-md space-y-6">
-          <h3 className="text-lg font-bold text-[var(--primary)] flex items-center gap-2"><Percent size={20} /> توزيع درجات الفهم</h3>
-          <div className="h-[300px] w-full flex items-center justify-center">
+        {/* مربع توزيع درجات الفهم المصغر */}
+        <div className="bg-[var(--card-bg)] rounded-xl p-2.5 sm:p-3 border border-[var(--border)] shadow-2xs space-y-1.5">
+          <h3 className="text-xs font-black text-[var(--primary)] flex items-center gap-1.5">
+            <Percent size={14} />
+            <span>توزيع درجات الفهم القرائي</span>
+          </h3>
+          <div className="h-[105px] w-full flex items-center justify-center">
             {pieData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">
+                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={24} outerRadius={42} paddingAngle={3} dataKey="value">
                     {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip contentStyle={{ fontSize: "10px", borderRadius: "6px", padding: "4px 6px" }} />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="text-[var(--text-light)]">لا توجد نتائج اختبارات بعد</div>
+              <div className="text-[10px] text-[var(--text-light)] font-bold">لا توجد نتائج اختبارات بعد</div>
             )}
           </div>
-          <div className="flex justify-center gap-4 flex-wrap">
+          <div className="flex justify-center gap-2 flex-wrap pt-0.5">
             {pieData.map((d, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs font-bold">
-                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></span>
-                <span>{d.name}</span>
+              <div key={i} className="flex items-center gap-1 text-[9px] font-bold">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: d.color }}></span>
+                <span className="text-gray-600">{d.name}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      <div className="bg-[var(--card-bg)] rounded-[var(--radius-md)] p-8 border border-[var(--border)] shadow-md space-y-6">
-        <h3 className="text-lg font-bold text-[var(--primary)] flex items-center gap-2"><History size={20} /> آخر جلسات القراءة</h3>
+      {/* 4. مربع جدول جلسات القراءة المصغر */}
+      <div className="bg-[var(--card-bg)] rounded-xl p-2.5 sm:p-3 border border-[var(--border)] shadow-2xs space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-black text-[var(--primary)] flex items-center gap-1.5">
+            <History size={14} />
+            <span>سجل جلسات القراءة والاختبارات</span>
+          </h3>
+          <span className="text-[10px] text-gray-400 font-bold">
+            إجمالي: {toIndianNumbers(sessions.length)} جلسة
+          </span>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-center text-sm">
+          <table className="w-full text-center text-xs">
             <thead>
-              <tr className="bg-[var(--bg)] text-[var(--text)] border-b-2 border-[var(--border)]">
-                <th className="p-2 font-bold text-xs">التاريخ</th>
-                <th className="p-2 font-bold text-xs">النص</th>
-                <th className="p-2 font-bold text-xs">السرعة</th>
-                <th className="p-2 font-bold text-xs">الأخطاء</th>
-                <th className="p-2 font-bold text-xs">الدرجة</th>
-                <th className="p-2 font-bold text-xs">المدة</th>
-                <th className="p-2 font-bold text-xs">الحالة</th>
-                <th className="p-2 font-bold text-xs">التفاصيل</th>
+              <tr className="bg-[var(--bg)] text-[var(--text-light)] border-b border-[var(--border)]">
+                <th className="py-1 px-1.5 font-black text-[10px]">التاريخ</th>
+                <th className="py-1 px-1.5 font-black text-[10px]">النص</th>
+                <th className="py-1 px-1.5 font-black text-[10px]">السرعة</th>
+                <th className="py-1 px-1.5 font-black text-[10px]">الأخطاء</th>
+                <th className="py-1 px-1.5 font-black text-[10px]">التقييم</th>
+                <th className="py-1 px-1.5 font-black text-[10px]">المدة</th>
+                <th className="py-1 px-1.5 font-black text-[10px]">الحالة</th>
+                <th className="py-1 px-1.5 font-black text-[10px]">التفاصيل</th>
               </tr>
             </thead>
             <tbody>
               {sessions.map(s => {
                 const quiz = quizzes.find(q => q.lessonId === s.lessonId && new Date(q.date) >= new Date(s.date));
                 return (
-                  <tr key={s.id} className="border-b border-[var(--border)] hover:bg-primary/5 transition-all">
-                    <td className="p-2 text-xs">{new Date(s.date).toLocaleDateString("ar-EG")}</td>
-                    <td className="p-2 text-xs font-bold">{s.lessonTitle}</td>
-                    <td className="p-2 text-xs tabular-nums">{toIndianNumbers(s.speed)}</td>
-                    <td className="p-2 text-xs text-[var(--accent)] tabular-nums">{toIndianNumbers(s.errors)}</td>
-                    <td className="p-2 font-bold text-[var(--primary)] text-xs">
+                  <tr key={s.id} className="border-b border-gray-100 hover:bg-primary/5 transition-all">
+                    <td className="py-1 px-1.5 text-[10px] text-gray-500">{new Date(s.date).toLocaleDateString("ar-SA")}</td>
+                    <td className="py-1 px-1.5 text-[11px] font-black text-gray-900">{s.lessonTitle}</td>
+                    <td className="py-1 px-1.5 text-[11px] tabular-nums font-bold">{toIndianNumbers(s.speed)}</td>
+                    <td className="py-1 px-1.5 text-[11px] text-[var(--accent)] tabular-nums font-bold">{toIndianNumbers(s.errors)}</td>
+                    <td className="py-1 px-1.5 font-black text-[var(--primary)] text-[11px]">
                       {quiz ? (
                         <div className="flex flex-col items-center">
-                          <span className="tabular-nums">{toIndianNumbers(quiz.score)}%</span>
+                          <span className={cn(
+                            "tabular-nums px-1.5 py-0.2 rounded font-black text-[10px]",
+                            quiz.score >= 85 ? "bg-emerald-50 text-emerald-700" :
+                            quiz.score >= 70 ? "bg-blue-50 text-blue-700" :
+                            quiz.score >= 50 ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
+                          )}>
+                            {toIndianNumbers(quiz.score)}%
+                          </span>
                           {quiz.teacherSignature && (
-                            <img src={quiz.teacherSignature} className="h-4 grayscale contrast-150 mt-1" alt="توقيع" />
+                            <img src={quiz.teacherSignature} className="h-3 grayscale contrast-150 mt-0.5" alt="توقيع" />
                           )}
                           {!quiz.teacherSignature && profile?.role === "teacher" && (
-                            <button onClick={() => setSelectedQuizForSigning(quiz)} className="text-[7px] text-blue-500 hover:underline">توقيع</button>
+                            <button onClick={() => setSelectedQuizForSigning(quiz)} className="text-[8px] text-blue-600 hover:underline font-bold mt-0.5">توقيع</button>
                           )}
                         </div>
-                      ) : "—"}
+                      ) : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="p-2 text-xs tabular-nums">{toIndianNumbers(s.duration)} ث</td>
-                    <td className="p-2">
-                      <span className={cn("px-2 py-0.5 rounded-full text-[8px] font-bold text-white", s.completed ? "bg-[var(--success)]" : "bg-[var(--warning)]")}>
-                        {s.completed ? "نعم" : "لا"}
+                    <td className="py-1 px-1.5 text-[10px] tabular-nums text-gray-600">{toIndianNumbers(s.duration)} ث</td>
+                    <td className="py-1 px-1.5">
+                      <span className={cn("px-1.5 py-0.2 rounded-md text-[8px] font-black text-white", s.completed ? "bg-[var(--success)]" : "bg-[var(--warning)]")}>
+                        {s.completed ? "مكتمل" : "جزئي"}
                       </span>
                     </td>
-                    <td className="p-2">
-                      <button onClick={() => setSelectedSession(s)} className="text-[var(--primary)] hover:scale-110 transition-all"><Eye size={16} /></button>
+                    <td className="py-1 px-1.5">
+                      <button onClick={() => setSelectedSession(s)} className="text-[var(--primary)] hover:scale-110 transition-all p-0.5" title="معاينة الأخطاء">
+                        <Eye size={13} />
+                      </button>
                     </td>
                   </tr>
                 );
               })}
               {sessions.length === 0 && (
-                <tr><td colSpan={8} className="p-12 text-[var(--text-light)]">لا توجد جلسات قراءة بعد</td></tr>
+                <tr><td colSpan={8} className="p-6 text-xs text-gray-400 font-bold">لا توجد جلسات قراءة مسجلة بعد</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Details Modal المصغر */}
       {selectedSession && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[200] p-4">
-          <div className="bg-[var(--panel)] rounded-[var(--radius-lg)] p-10 max-w-xl w-full text-center border-2 border-[var(--primary)] shadow-2xl space-y-8 animate-in zoom-in duration-300">
-            <h2 className="text-2xl font-bold flex items-center justify-center gap-3">
-              <AlertCircle className="text-[var(--accent)]" />
-              <span>تفاصيل الأخطاء</span>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-[200] p-3">
+          <div className="bg-[var(--panel)] rounded-xl p-4 max-w-sm w-full text-center border border-[var(--border)] shadow-2xl space-y-3 animate-in zoom-in duration-200">
+            <h2 className="text-sm font-black flex items-center justify-center gap-1.5">
+              <AlertCircle className="text-[var(--accent)]" size={16} />
+              <span>تفاصيل أخطاء القراءة</span>
             </h2>
-            <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto p-6 bg-[var(--bg)] rounded-3xl border border-[var(--border)]">
+            <div className="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-2.5 bg-[var(--bg)] rounded-xl border border-[var(--border)]">
               {selectedSession.errorWords.length > 0 ? selectedSession.errorWords.map((w, i) => (
-                <span key={i} className="bg-[var(--accent)] text-white px-4 py-1 rounded-full text-sm font-bold">{w}</span>
-              )) : <div className="w-full text-center text-[var(--text-light)]">لا توجد أخطاء مسجلة</div>}
+                <span key={i} className="bg-[var(--accent)] text-white px-2 py-0.5 rounded-md text-[10px] font-bold">{w}</span>
+              )) : <div className="w-full text-center text-xs text-gray-400">لا توجد أخطاء مسجلة في هذا النص ✓</div>}
             </div>
-            <button onClick={() => setSelectedSession(null)} className="w-full py-4 bg-[var(--primary)] text-white rounded-full font-bold hover:shadow-lg transition-all">إغلاق</button>
+            <button onClick={() => setSelectedSession(null)} className="w-full py-1.5 bg-[var(--primary)] text-white rounded-lg text-xs font-black hover:shadow-md transition-all cursor-pointer">
+              إغلاق
+            </button>
           </div>
         </div>
       )}
 
-      {/* Quiz Signing Modal */}
+      {/* Quiz Signing Modal المصغر */}
       {selectedQuizForSigning && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[200] p-4">
-           <div className="bg-[var(--card-bg)] rounded-[var(--radius-lg)] p-8 max-w-md w-full border border-[var(--border)] shadow-2xl space-y-6 animate-in zoom-in duration-200">
-              <h3 className="text-xl font-bold text-center">توقيع المعلم على الاختبار</h3>
-              <p className="text-xs text-center text-[var(--text-light)]">اختبار: {selectedQuizForSigning.lessonTitle} - الدرجة: {toIndianNumbers(selectedQuizForSigning.score)}%</p>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-[200] p-3">
+           <div className="bg-[var(--card-bg)] rounded-xl p-4 max-w-xs w-full border border-[var(--border)] shadow-2xl space-y-3 animate-in zoom-in duration-200">
+              <h3 className="text-sm font-black text-center text-gray-900">توقيع المعلم على الاختبار</h3>
+              <p className="text-[11px] text-center text-gray-500 font-bold">
+                {selectedQuizForSigning.lessonTitle} - الدرجة: {toIndianNumbers(selectedQuizForSigning.score)}%
+              </p>
               
               <SignaturePad 
                 onSave={async (sig) => {
@@ -258,7 +302,9 @@ export default function Reports() {
                 }}
               />
               
-              <button onClick={() => setSelectedQuizForSigning(null)} className="w-full py-3 bg-[var(--bg)] text-[var(--text)] rounded-full font-bold border border-[var(--border)]">إلغاء</button>
+              <button onClick={() => setSelectedQuizForSigning(null)} className="w-full py-1.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold hover:bg-gray-200 transition-all cursor-pointer">
+                إلغاء
+              </button>
            </div>
         </div>
       )}

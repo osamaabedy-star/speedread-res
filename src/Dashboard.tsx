@@ -2,9 +2,9 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { Lesson, ReaderConfig, UserProfile } from "./types";
-import { cn, toIndianNumbers, isGradeMatch, getGradeLabel, normalizeGrade } from "./utils";
+import { cn, toIndianNumbers, isGradeMatch, getGradeLabel, normalizeGrade, getSavedReaderPreferences, saveReaderPreferences, ARABIC_FONTS, getFontFamilyById } from "./utils";
 import { motion, AnimatePresence } from "motion/react";
-import { Sliders, Book, Search, Play, Zap, Scroll, BookOpen, Calendar, CalendarCheck, ChevronRight, FileText, Lock, ChartLine, User, Camera, Loader2, Save, X, Trophy, Star, TrendingUp, Flame, Crown, Award } from "lucide-react";
+import { Sliders, Book, Search, Play, Zap, Scroll, BookOpen, Calendar, CalendarCheck, ChevronRight, FileText, Lock, ChartLine, User, Camera, Loader2, Save, X, Trophy, Star, TrendingUp, Flame, Crown, Award, Sparkles } from "lucide-react";
 import { collection, doc, updateDoc, getDocs, orderBy, query, onSnapshot, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { updatePassword } from "firebase/auth";
@@ -32,14 +32,16 @@ export default function Dashboard() {
   const { profile, refreshProfile, user } = useAuth();
   const navigate = useNavigate();
   
+  const savedPrefs = getSavedReaderPreferences();
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
-  const [font, setFont] = useState("'Amiri', serif");
-  const [mode, setMode] = useState<"rsvp" | "scroll" | "static">("rsvp");
-  const [speed, setSpeed] = useState(150);
+  const [fontFamilyId, setFontFamilyId] = useState<"madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa">(savedPrefs.fontFamilyId || "madrasa");
+  const [font, setFont] = useState(getFontFamilyById(savedPrefs.fontFamilyId));
+  const [mode, setMode] = useState<"rsvp" | "scroll" | "static" | "disappearing">(savedPrefs.mode || "static");
+  const [speed, setSpeed] = useState(savedPrefs.speed || 150);
   const [grade, setGrade] = useState<string | null>(profile?.grade || "1");
   const [semester, setSemester] = useState<string>("الفصل الدراسي الأول");
-  const [fontSize, setFontSize] = useState(28);
+  const [fontSize, setFontSize] = useState(savedPrefs.fontSize || 36);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [activeSession, setActiveSession] = useState<any>(null);
@@ -178,11 +180,19 @@ export default function Dashboard() {
       }
     }
 
+    saveReaderPreferences({
+      speed,
+      mode,
+      fontFamilyId,
+      fontSize
+    });
+
     const config: ReaderConfig = {
       lessonId: selectedLessonId,
       speed,
       mode,
-      font,
+      font: getFontFamilyById(fontFamilyId),
+      fontFamilyId,
       theme: localStorage.getItem("theme") || "light",
       fontSize
     };
@@ -404,53 +414,126 @@ export default function Dashboard() {
             </div>
 
             {showSettings && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} className="space-y-6 overflow-hidden pt-2">
-              {/* Font Selector */}
-              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                {["'Amiri', serif", "'Cairo', sans-serif", "'Almarai', sans-serif", "'Readex Pro', sans-serif"].map(f => (
-                  <button key={f} onClick={() => setFont(f)} className={cn("px-4 py-2 rounded-full border border-[var(--border)] whitespace-nowrap text-sm transition-all", font === f ? "bg-[var(--primary)] text-white border-[var(--primary)]" : "bg-[var(--card-bg)] text-[var(--text)] hover:bg-[var(--bg)]")}>
-                    {f.split("'")[1]}
-                  </button>
-                ))}
-              </div>
-
-              {/* Font Size */}
-          <div className="flex items-center gap-3 bg-[var(--bg)] p-1.5 rounded-full border border-[var(--border)] w-fit">
-            <button onClick={() => setFontSize(Math.max(12, fontSize - 2))} className="w-7 h-7 rounded-full bg-[var(--card-bg)] flex items-center justify-center text-sm font-bold shadow-sm">-</button>
-            <span className="font-bold min-w-[1.5rem] text-center text-sm tabular-nums">{toIndianNumbers(fontSize)}</span>
-            <button onClick={() => setFontSize(Math.min(96, fontSize + 2))} className="w-7 h-7 rounded-full bg-[var(--card-bg)] flex items-center justify-center text-sm font-bold shadow-sm">+</button>
-          </div>
-
-              {/* Preview */}
-              <div className="bg-[var(--bg)] rounded-[var(--radius-md)] p-6 border border-[var(--border)] text-center">
-                <p className="text-xs text-[var(--text-light)] mb-2">معاينة الخط</p>
-                <div style={{ fontFamily: font, fontSize: `${fontSize}px` }} className="text-[var(--primary)] font-bold transition-all">
-                  {profile?.fullName || profile?.username || "معاينة الخط"}
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} className="space-y-5 overflow-hidden pt-2">
+                {/* 1. نوع الخط العربي الافتراضي */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-black text-gray-700">نوع الخط الافتراضي:</span>
+                    <span className="font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                      {ARABIC_FONTS.find(f => f.id === fontFamilyId)?.label || "مدرسي"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    {ARABIC_FONTS.map(f => {
+                      const isSelected = fontFamilyId === f.id;
+                      return (
+                        <button
+                          key={f.id}
+                          onClick={() => {
+                            setFontFamilyId(f.id as any);
+                            setFont(f.family);
+                            saveReaderPreferences({ fontFamilyId: f.id as any });
+                          }}
+                          className={cn(
+                            "py-2 px-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5",
+                            isSelected
+                              ? "bg-blue-600 text-white border-blue-600 shadow-2xs font-black"
+                              : "bg-[var(--card-bg)] hover:bg-gray-100 text-gray-700 border-[var(--border)] font-bold"
+                          )}
+                        >
+                          <span className="text-[11px]">{f.label}</span>
+                          <span style={{ fontFamily: f.family }} className={cn("text-[10px] truncate max-w-full", isSelected ? "text-white" : "text-gray-400")}>
+                            أبجد
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
 
-              {/* Mode Selector */}
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: "rsvp", icon: Zap, label: "كلمة بكلمة" },
-                  { id: "scroll", icon: Scroll, label: "تمرير انسيابي" },
-                  { id: "static", icon: BookOpen, label: "نص ثابت" }
-                ].map(m => (
-                  <button key={m.id} onClick={() => setMode(m.id as any)} className={cn("flex flex-col items-center gap-2 p-4 rounded-[var(--radius-sm)] border border-[var(--border)] transition-all", mode === m.id ? "bg-[var(--primary)] text-white border-[var(--primary)]" : "bg-[var(--bg)] text-[var(--text)] hover:bg-[var(--card-bg)]")}>
-                    <m.icon size={24} />
-                    <span className="text-[10px] font-bold">{m.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Speed Slider */}
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-2 text-[10px] font-bold"><Zap size={14} /> السرعة</span>
-                  <span className="text-xl font-bold text-[var(--primary)] tabular-nums">{toIndianNumbers(speed)}</span>
+                {/* 2. حجم الخط */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-black text-gray-700">حجم الخط:</span>
+                    <span className="font-black text-blue-700">{toIndianNumbers(fontSize)} نقطة</span>
+                  </div>
+                  <div className="flex items-center gap-3 bg-[var(--bg)] p-1.5 rounded-full border border-[var(--border)] w-fit">
+                    <button 
+                      onClick={() => {
+                        const newSize = Math.max(16, fontSize - 2);
+                        setFontSize(newSize);
+                        saveReaderPreferences({ fontSize: newSize });
+                      }} 
+                      className="w-7 h-7 rounded-full bg-[var(--card-bg)] flex items-center justify-center text-sm font-bold shadow-sm cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <span className="font-bold min-w-[1.5rem] text-center text-sm tabular-nums">{toIndianNumbers(fontSize)}</span>
+                    <button 
+                      onClick={() => {
+                        const newSize = Math.min(72, fontSize + 2);
+                        setFontSize(newSize);
+                        saveReaderPreferences({ fontSize: newSize });
+                      }} 
+                      className="w-7 h-7 rounded-full bg-[var(--card-bg)] flex items-center justify-center text-sm font-bold shadow-sm cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
-                <input type="range" min="10" max="400" step="10" value={speed} onChange={(e) => setSpeed(parseInt(e.target.value))} className="w-full h-1.5 bg-[var(--border)] rounded-lg appearance-none cursor-pointer accent-[var(--primary)]" />
-              </div>
+
+                {/* 3. شكل القراءة */}
+                <div className="space-y-1.5">
+                  <span className="text-xs font-black text-gray-700 block">شكل القراءة المفضل:</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { id: "static", icon: BookOpen, label: "📄 نص كامل", desc: "كامل الشاشة" },
+                      { id: "scroll", icon: Scroll, label: "📜 انسيابي", desc: "صعود للأعلى" },
+                      { id: "rsvp", icon: Zap, label: "⚡ كلمة بكلمة", desc: "وميض" },
+                      { id: "disappearing", icon: Sparkles, label: "✨ ظهور واختفاء", desc: "تتابع واختفاء" }
+                    ].map(m => (
+                      <button 
+                        key={m.id} 
+                        onClick={() => {
+                          setMode(m.id as any);
+                          saveReaderPreferences({ mode: m.id as any });
+                        }} 
+                        className={cn(
+                          "flex flex-col items-center gap-1 p-2.5 rounded-xl border transition-all cursor-pointer", 
+                          mode === m.id 
+                            ? "bg-[var(--primary)] text-white border-[var(--primary)] shadow-xs font-black" 
+                            : "bg-[var(--bg)] text-[var(--text)] hover:bg-[var(--card-bg)] border-[var(--border)] font-bold"
+                        )}
+                      >
+                        <m.icon size={18} />
+                        <span className="text-[11px]">{m.label}</span>
+                        <span className="text-[9px] opacity-75">{m.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4. السرعة */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="flex items-center gap-2 text-xs font-bold text-gray-700"><Zap size={14} className="text-amber-500" /> سرعة القراءة الافتراضية</span>
+                    <span className="text-sm font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 tabular-nums">{toIndianNumbers(speed)} ك/د</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="30" 
+                    max="400" 
+                    step="10" 
+                    value={speed} 
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setSpeed(val);
+                      saveReaderPreferences({ speed: val });
+                    }} 
+                    className="w-full h-1.5 bg-[var(--border)] rounded-lg appearance-none cursor-pointer accent-amber-500" 
+                  />
+                  <p className="text-[10px] text-gray-400 font-bold">تُحفظ الإعدادات تلقائياً ولا تتغير حتى تقوم بتعديلها</p>
+                </div>
 
               {/* Grade Selector */}
               <div className="space-y-4">

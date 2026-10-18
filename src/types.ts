@@ -103,15 +103,19 @@ export interface QuizQuestion {
   correct?: number;
   items?: string[];
   correctOrder?: number[];
+  difficulty?: "easy" | "medium" | "hard" | 1 | 2 | 3;
+  difficultyLabel?: string;
 }
 
 export interface ReaderConfig {
   lessonId: string;
   speed: number;
-  mode: "rsvp" | "scroll" | "static";
+  mode: "rsvp" | "scroll" | "static" | "disappearing";
   font: string;
+  fontFamilyId?: "naskh" | "madrasa" | "cairo" | "amiri" | "ruqaa";
   theme: string;
   fontSize: number;
+  lineHeight?: number;
   teacherMode?: boolean;
   targetStudentId?: string;
   targetStudentName?: string;
