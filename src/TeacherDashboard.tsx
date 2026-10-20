@@ -23,7 +23,8 @@ import {
   Zap,
   X,
   Award,
-  Star
+  Star,
+  Eye
 } from "lucide-react";
 import { collection, onSnapshot, getDocs, query, where, doc, updateDoc, orderBy, limit } from "firebase/firestore";
 import { db } from "./firebase";
@@ -107,14 +108,14 @@ export default function TeacherDashboard() {
   
   const initialTeacherPrefs = getSavedReaderPreferences();
 
-  // Reading mode preferred by teacher: "static" | "scroll" | "rsvp" | "disappearing"
-  const [teacherReadingMode, setTeacherReadingMode] = useState<"static" | "scroll" | "rsvp" | "disappearing">(() => {
+  // Reading mode preferred by teacher: "static" | "scroll" | "rsvp" | "disappearing" | "flash"
+  const [teacherReadingMode, setTeacherReadingMode] = useState<"static" | "scroll" | "rsvp" | "disappearing" | "flash">(() => {
     return initialTeacherPrefs.mode || "static";
   });
 
   // Modal to choose reading mode, font and speed before launching Reader
   const [lessonForReadingModal, setLessonForReadingModal] = useState<Lesson | null>(null);
-  const [readingModeDraft, setReadingModeDraft] = useState<"static" | "scroll" | "rsvp" | "disappearing">(initialTeacherPrefs.mode || "static");
+  const [readingModeDraft, setReadingModeDraft] = useState<"static" | "scroll" | "rsvp" | "disappearing" | "flash">(initialTeacherPrefs.mode || "static");
   const [readingSpeedDraft, setReadingSpeedDraft] = useState<number>(initialTeacherPrefs.speed || 150);
   const [readingFontDraft, setReadingFontDraft] = useState<"madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa">(initialTeacherPrefs.fontFamilyId || "madrasa");
   const [readingFontSizeDraft, setReadingFontSizeDraft] = useState<number>(initialTeacherPrefs.fontSize || 36);
@@ -502,7 +503,7 @@ export default function TeacherDashboard() {
   };
 
   const handleConfirmStartSession = (
-    modeToUse: "static" | "scroll" | "rsvp" | "disappearing", 
+    modeToUse: "static" | "scroll" | "rsvp" | "disappearing" | "flash", 
     speedToUse: number,
     fontToUse: "madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa" = readingFontDraft,
     fontSizeToUse: number = readingFontSizeDraft,
@@ -540,7 +541,7 @@ export default function TeacherDashboard() {
     navigate("/read");
   };
 
-  const handleStartSession = (lesson: Lesson, modeOverride?: "static" | "scroll" | "rsvp" | "disappearing") => {
+  const handleStartSession = (lesson: Lesson, modeOverride?: "static" | "scroll" | "rsvp" | "disappearing" | "flash") => {
     if (!selectedStudent) {
       alert("الرجاء اختيار طالب من القائمة الجانبية أولاً لبدء التدريب معه.");
       return;
@@ -1395,7 +1396,7 @@ export default function TeacherDashboard() {
               {/* اختيار شكل القراءة */}
               <div className="space-y-2">
                 <label className="block text-xs font-black text-gray-800">اختر شكل القراءة المطلوب:</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                   <button
                     type="button"
                     onClick={() => setReadingModeDraft("static")}
@@ -1441,7 +1442,24 @@ export default function TeacherDashboard() {
                     <Zap size={18} className={readingModeDraft === "rsvp" ? "text-white" : "text-gray-400"} />
                     <span className="text-xs">⚡ كلمة كلمة</span>
                     <span className={cn("text-[9px]", readingModeDraft === "rsvp" ? "text-amber-100" : "text-gray-400")}>
-                      وميض سريع
+                      تتابع مركزي
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReadingModeDraft("flash")}
+                    className={cn(
+                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
+                      readingModeDraft === "flash"
+                        ? "bg-amber-600 border-amber-600 text-white shadow-xs ring-2 ring-amber-500/20 font-black"
+                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
+                    )}
+                  >
+                    <Eye size={18} className={readingModeDraft === "flash" ? "text-white" : "text-gray-400"} />
+                    <span className="text-xs">💡 وميض سريع</span>
+                    <span className={cn("text-[9px]", readingModeDraft === "flash" ? "text-amber-100" : "text-gray-400")}>
+                      نظام الوميض
                     </span>
                   </button>
 
@@ -1458,7 +1476,7 @@ export default function TeacherDashboard() {
                     <Sparkles size={18} className={readingModeDraft === "disappearing" ? "text-white" : "text-gray-400"} />
                     <span className="text-xs">✨ ظهور واختفاء</span>
                     <span className={cn("text-[9px]", readingModeDraft === "disappearing" ? "text-purple-100" : "text-gray-400")}>
-                      تظهر الكلمات وتختفي
+                      تظهر وتختفي
                     </span>
                   </button>
                 </div>

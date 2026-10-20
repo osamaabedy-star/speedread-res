@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { Lesson } from "./types";
-import { cn, toIndianNumbers } from "./utils";
+import { cn, toIndianNumbers, getSavedReaderPreferences, saveReaderPreferences, ARABIC_FONTS, getFontFamilyById } from "./utils";
 import { 
   Play, 
   Pause, 
@@ -28,7 +28,8 @@ import {
   Menu,
   PanelRightOpen,
   PanelRightClose,
-  RotateCcw
+  RotateCcw,
+  Sparkles
 } from "lucide-react";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
@@ -38,10 +39,12 @@ export default function Whiteboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   
+  const initialPrefs = getSavedReaderPreferences();
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [allLessons, setAllLessons] = useState<Lesson[]>([]);
   const [words, setWords] = useState<string[]>([]);
-  const [fontSize, setFontSize] = useState(64);
+  const [fontFamilyId, setFontFamilyId] = useState<"madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa">(initialPrefs.fontFamilyId || "madrasa");
+  const [fontSize, setFontSize] = useState(initialPrefs.fontSize ? initialPrefs.fontSize + 24 : 64);
   const [lineHeight, setLineHeight] = useState(2);
   const [isPlaying, setIsPlaying] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -49,15 +52,14 @@ export default function Whiteboard() {
   const [highlightedIndices, setHighlightedIndices] = useState<number[]>([]);
   const [laserPointer, setLaserPointer] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const [speed, setSpeed] = useState(120);
+  const [speed, setSpeed] = useState(initialPrefs.speed || 120);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showLessonPicker, setShowLessonPicker] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
 
   // Sidebar state for clean uncluttered presentation
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [showSpeedDialog, setShowSpeedDialog] = useState(false);
-  const [whiteboardMode, setWhiteboardMode] = useState<"standard" | "scroll">("standard");
+  const [whiteboardMode, setWhiteboardMode] = useState<"standard" | "scroll" | "disappearing" | "flash">("standard");
   const [showCustomTextModal, setShowCustomTextModal] = useState(false);
   const [customTextDraft, setCustomTextDraft] = useState("");
   const [customTitleDraft, setCustomTitleDraft] = useState("");
@@ -161,9 +163,9 @@ export default function Whiteboard() {
     setCustomTitleDraft("");
   };
 
-  // Word-by-word timer when in standard mode
+  // Word-by-word and disappearing timer
   useEffect(() => {
-    if (isPlaying && whiteboardMode === "standard") {
+    if (isPlaying && (whiteboardMode === "standard" || whiteboardMode === "disappearing" || whiteboardMode === "flash")) {
       const delay = (60000 / speed);
       timerRef.current = setInterval(() => {
         setCurrentIndex(prev => {
@@ -225,19 +227,9 @@ export default function Whiteboard() {
     return () => { if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current); };
   }, [whiteboardMode, isPlaying, scrollStep]);
 
-  // Request speed confirmation before starting if not already playing
+  // Direct toggle play/pause without any interrupting popups
   const handleTogglePlay = () => {
-    if (isPlaying) {
-      setIsPlaying(false);
-    } else {
-      setShowSpeedDialog(true);
-    }
-  };
-
-  const handleConfirmStartWithSpeed = (confirmedSpeed: number) => {
-    setSpeed(confirmedSpeed);
-    setShowSpeedDialog(false);
-    setIsPlaying(true);
+    setIsPlaying(prev => !prev);
   };
 
   const toggleHighlight = (idx: number) => {
@@ -274,28 +266,40 @@ export default function Whiteboard() {
           <span className="text-xs font-black hidden sm:inline">خيارات العرض والنصوص</span>
         </button>
 
-        {/* زر تشغيل / إيقاف سريع عائم بجانب القائمة */}
+        {/* زر تشغيل / إيقاف فوري ومباشر دون نوافذ معقدة */}
         <button
           onClick={handleTogglePlay}
           className={cn(
-            "p-2.5 rounded-2xl text-white shadow-lg transition-all flex items-center gap-1.5 cursor-pointer hover:scale-105 active:scale-95",
-            isPlaying ? "bg-red-500 hover:bg-red-600" : "bg-blue-600 hover:bg-blue-700"
+            "px-4 py-2 rounded-2xl text-white shadow-lg transition-all flex items-center gap-1.5 cursor-pointer hover:scale-105 active:scale-95",
+            isPlaying ? "bg-red-500 hover:bg-red-600" : "bg-emerald-600 hover:bg-emerald-700"
           )}
-          title={isPlaying ? "إيقاف مؤقت" : "بدء القراءة"}
+          title={isPlaying ? "إيقاف مؤقت" : "بدء القراءة فوراً"}
         >
           {isPlaying ? <Pause size={18} /> : <Play size={18} />}
           <span className="text-xs font-black">{isPlaying ? "إيقاف" : "تشغيل"}</span>
         </button>
 
-        {/* مؤشر السرعة الصغير */}
-        <button
-          onClick={() => setShowSpeedDialog(true)}
-          className="bg-white/90 hover:bg-white text-amber-800 backdrop-blur-md px-3 py-2 rounded-2xl shadow-lg border border-amber-200 text-xs font-black flex items-center gap-1 cursor-pointer transition-all"
-          title="تغيير السرعة"
-        >
-          <Zap size={14} className="text-amber-500" />
-          <span>{toIndianNumbers(speed)} ك/د</span>
-        </button>
+        {/* تحكم مباشر وسريع بالسرعة مع زرين + و - دون أي نوافذ منبثقة */}
+        <div className="bg-white/95 text-amber-900 backdrop-blur-md px-1.5 py-1 rounded-2xl shadow-lg border border-amber-200 text-xs font-black flex items-center gap-1">
+          <button
+            onClick={() => setSpeed(s => Math.max(30, s - 10))}
+            className="w-7 h-7 rounded-xl bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-800 flex items-center justify-center transition-all cursor-pointer"
+            title="تبطيء (-10 ك/د)"
+          >
+            <Minus size={14} />
+          </button>
+          <div className="px-1.5 flex items-center gap-1" title="سرعة القراءة الحالية">
+            <Zap size={13} className="text-amber-500" />
+            <span className="tabular-nums font-black">{toIndianNumbers(speed)} ك/د</span>
+          </div>
+          <button
+            onClick={() => setSpeed(s => Math.min(450, s + 10))}
+            className="w-7 h-7 rounded-xl bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-800 flex items-center justify-center transition-all cursor-pointer"
+            title="تسريع (+10 ك/د)"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
 
       {/* زر العودة للرئيسية في أعلى اليسار */}
@@ -309,11 +313,13 @@ export default function Whiteboard() {
         </button>
       </div>
 
-      {/* عنوان الدرس المختار (يظهر بشكل خافت ورقيق في الأعلى دون حجب مساحة القراءة) */}
+      {/* عنوان الدرس المختار (سبورة الفصل التفاعلية بدون ارتباط بطالب معين) */}
       {lesson && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-10 pointer-events-none text-center opacity-70 hover:opacity-100 transition-opacity">
-          <span className="bg-white/70 backdrop-blur-xs px-4 py-1 rounded-full text-xs font-black text-gray-600 border border-gray-200 shadow-2xs">
-            {lesson.title} {lesson.grade ? `(${lesson.grade})` : ""}
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-10 pointer-events-none text-center">
+          <span className="bg-white/95 backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-black text-gray-800 border border-gray-200 shadow-xs flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+            <span>{lesson.title}</span>
+            {lesson.grade && <span className="text-[11px] text-gray-400 font-bold">({lesson.grade})</span>}
           </span>
         </div>
       )}
@@ -334,7 +340,7 @@ export default function Whiteboard() {
               style={{ 
                 fontSize: `${fontSize}px`, 
                 lineHeight: lineHeight,
-                fontFamily: "'Amiri', serif"
+                fontFamily: getFontFamilyById(fontFamilyId)
               }} 
               className={cn(
                 "w-full max-w-5xl px-8 text-center rtl whitespace-pre-line will-change-transform select-none leading-relaxed",
@@ -356,8 +362,93 @@ export default function Whiteboard() {
               ))}
             </div>
           </div>
+        ) : whiteboardMode === "disappearing" ? (
+          /* نمط 2: نمط الظهور والاختفاء (النص مختفي وتظهر الكلمات بجانب بعض وتختفي) */
+          <div className="w-full h-full flex flex-col items-center justify-center p-8 select-none">
+            <div className="text-xs font-black text-purple-700 bg-purple-50 px-3.5 py-1.5 rounded-full border border-purple-200 mb-6 flex items-center gap-1.5 shadow-2xs">
+              <Sparkles size={15} className="text-purple-600" />
+              <span>نمط الظهور والاختفاء للفصل • الكلمة {toIndianNumbers(currentIndex + 1)} من {toIndianNumbers(words.length)}</span>
+            </div>
+
+            <div 
+              style={{ 
+                fontFamily: getFontFamilyById(fontFamilyId), 
+                fontSize: `${fontSize + 6}px`, 
+                lineHeight: lineHeight 
+              }} 
+              className={cn(
+                "text-center rtl font-black min-h-[200px] flex items-center justify-center flex-wrap gap-x-6 gap-y-4 p-10 rounded-3xl shadow-lg max-w-5xl w-full border transition-all",
+                focusMode ? "bg-gray-900 border-purple-500/30 text-white" : "bg-white border-purple-100 text-gray-900"
+              )}
+            >
+              {words.map((w, i) => {
+                const isVisible = i <= currentIndex && i >= Math.max(0, currentIndex - 2);
+                if (!isVisible) return null;
+                const isCurrent = i === currentIndex;
+                const isHighlighted = highlightedIndices.includes(i);
+
+                return (
+                  <span
+                    key={i}
+                    onClick={() => toggleHighlight(i)}
+                    className={cn(
+                      "px-5 py-2 rounded-2xl transition-all inline-block shadow-xs cursor-pointer",
+                      isHighlighted
+                        ? "bg-yellow-300 text-black shadow-lg scale-110"
+                        : isCurrent
+                          ? "bg-purple-600 text-white shadow-xl scale-110 ring-4 ring-purple-300"
+                          : "bg-purple-50 text-purple-900 border border-purple-200 opacity-80"
+                    )}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+
+            <p className="text-xs text-gray-400 font-bold mt-6">
+              تظهر الكلمات بجانب بعضها وتختفي تلقائياً لتدريب طلاب الفصل على سرعة الالتقاط البصري
+            </p>
+          </div>
+        ) : whiteboardMode === "flash" ? (
+          /* نمط 3: نظام الوميض القرائي السريع للسبورة التفاعلية */
+          <div className="w-full h-full flex flex-col items-center justify-center p-8 select-none">
+            <div className="text-xs font-black text-amber-800 bg-amber-50 px-4 py-1.5 rounded-full border border-amber-300 mb-6 flex items-center gap-2 shadow-xs">
+              <Zap size={16} className="text-amber-500 fill-amber-500 animate-pulse" />
+              <span>نظام الوميض القرائي للفصل • الكلمة {toIndianNumbers(currentIndex + 1)} من {toIndianNumbers(words.length)} • {toIndianNumbers(speed)} ك/د</span>
+            </div>
+
+            {/* نقطة الارتكاز البصرية المركزية */}
+            <div className="flex items-center justify-center gap-4 text-gray-300 mb-6">
+              <div className="w-20 h-1 bg-gradient-to-l from-amber-400 to-transparent rounded-full" />
+              <span className="w-5 h-5 rounded-full bg-amber-500 shadow-xl animate-ping ring-8 ring-amber-300/40" />
+              <div className="w-20 h-1 bg-gradient-to-r from-amber-400 to-transparent rounded-full" />
+            </div>
+
+            {/* صندوق الوميض المكبر للسبورة */}
+            <div 
+              key={currentIndex}
+              style={{ 
+                fontFamily: getFontFamilyById(fontFamilyId), 
+                fontSize: `${fontSize + 24}px`, 
+                lineHeight: lineHeight 
+              }} 
+              className={cn(
+                "text-center rtl font-black min-h-[200px] flex items-center justify-center py-10 px-14 rounded-3xl shadow-2xl max-w-4xl w-full border-2 transition-all animate-in zoom-in-95 duration-100",
+                focusMode 
+                  ? "bg-gray-900 border-amber-400/50 text-white ring-8 ring-amber-500/20" 
+                  : "bg-white border-amber-300 text-gray-950 ring-8 ring-amber-100/80"
+              )}
+            >
+              {words[currentIndex] || ""}
+            </div>
+
+            <p className="text-xs text-gray-400 font-bold mt-6 text-center">
+              ثبّتوا نظركم على النقطة المركزية لامتصاص الكلمة بومضة بصرية جماعية دون حركة العين
+            </p>
+          </div>
         ) : (
-          /* نمط 2: العرض العادي للنص على كامل الشاشة دون اقتطاع */
+          /* نمط 3: العرض العادي للنص على كامل الشاشة */
           <div className="w-full h-full overflow-y-auto p-8 sm:p-16">
             <div 
               className={cn(
@@ -367,7 +458,7 @@ export default function Whiteboard() {
               style={{ 
                 fontSize: `${fontSize}px`, 
                 lineHeight: lineHeight,
-                fontFamily: "'Amiri', serif"
+                fontFamily: getFontFamilyById(fontFamilyId)
               }}
             >
               {words.map((word, i) => (
@@ -476,32 +567,96 @@ export default function Whiteboard() {
                     <span>شكل العرض والانسياب</span>
                   </h4>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                     <button
                       onClick={() => { setWhiteboardMode("standard"); setIsPlaying(false); }}
                       className={cn(
-                        "p-3 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer",
+                        "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
                         whiteboardMode === "standard"
                           ? "bg-blue-600 text-white border-blue-600 shadow-md font-black"
                           : "bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 font-bold"
                       )}
                     >
-                      <Type size={18} />
-                      <span className="text-xs">عرض ثابت عادي</span>
+                      <Type size={16} />
+                      <span className="text-[11px]">عرض ثابت</span>
                     </button>
 
                     <button
                       onClick={() => { setWhiteboardMode("scroll"); setIsPlaying(false); }}
                       className={cn(
-                        "p-3 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer",
+                        "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
                         whiteboardMode === "scroll"
                           ? "bg-blue-600 text-white border-blue-600 shadow-md font-black"
                           : "bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 font-bold"
                       )}
                     >
-                      <ArrowUpDown size={18} />
-                      <span className="text-xs">تمرير انسيابي متصاعد</span>
+                      <ArrowUpDown size={16} />
+                      <span className="text-[11px]">تمرير انسيابي</span>
                     </button>
+
+                    <button
+                      onClick={() => { setWhiteboardMode("disappearing"); setIsPlaying(false); }}
+                      className={cn(
+                        "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
+                        whiteboardMode === "disappearing"
+                          ? "bg-purple-600 text-white border-purple-600 shadow-md font-black"
+                          : "bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 font-bold"
+                      )}
+                    >
+                      <Sparkles size={16} />
+                      <span className="text-[11px]">ظهور واختفاء</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setWhiteboardMode("flash"); setIsPlaying(false); }}
+                      className={cn(
+                        "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
+                        whiteboardMode === "flash"
+                          ? "bg-amber-600 text-white border-amber-600 shadow-md font-black"
+                          : "bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 font-bold"
+                      )}
+                    >
+                      <Eye size={16} />
+                      <span className="text-[11px]">نظام الوميض</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* نوع الخط العربي الافتراضي */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider">نوع الخط العربي</h4>
+                    <span className="text-xs font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                      {ARABIC_FONTS.find(f => f.id === fontFamilyId)?.label || "مدرسي"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    {ARABIC_FONTS.map(font => {
+                      const isSelected = fontFamilyId === font.id;
+                      return (
+                        <button
+                          key={font.id}
+                          onClick={() => {
+                            setFontFamilyId(font.id as any);
+                            saveReaderPreferences({ fontFamilyId: font.id as any });
+                          }}
+                          className={cn(
+                            "py-2 px-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5",
+                            isSelected
+                              ? "bg-blue-600 text-white border-blue-600 shadow-2xs font-black"
+                              : "bg-gray-50 hover:bg-gray-100 text-gray-700 border-gray-200 font-bold"
+                          )}
+                        >
+                          <span className="text-[11px]">{font.label}</span>
+                          <span 
+                            style={{ fontFamily: font.family }} 
+                            className={cn("text-[10px] truncate max-w-full", isSelected ? "text-white" : "text-gray-400")}
+                          >
+                            أبجد
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 

@@ -4,7 +4,7 @@ import { useAuth } from "./AuthContext";
 import { Lesson, ReaderConfig, UserProfile } from "./types";
 import { cn, toIndianNumbers, isGradeMatch, getGradeLabel, normalizeGrade, getSavedReaderPreferences, saveReaderPreferences, ARABIC_FONTS, getFontFamilyById } from "./utils";
 import { motion, AnimatePresence } from "motion/react";
-import { Sliders, Book, Search, Play, Zap, Scroll, BookOpen, Calendar, CalendarCheck, ChevronRight, FileText, Lock, ChartLine, User, Camera, Loader2, Save, X, Trophy, Star, TrendingUp, Flame, Crown, Award, Sparkles } from "lucide-react";
+import { Sliders, Book, Search, Play, Zap, Scroll, BookOpen, Calendar, CalendarCheck, ChevronRight, FileText, Lock, ChartLine, User, Camera, Loader2, Save, X, Trophy, Star, TrendingUp, Flame, Crown, Award, Sparkles, Eye } from "lucide-react";
 import { collection, doc, updateDoc, getDocs, orderBy, query, onSnapshot, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { updatePassword } from "firebase/auth";
@@ -37,7 +37,7 @@ export default function Dashboard() {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [fontFamilyId, setFontFamilyId] = useState<"madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa">(savedPrefs.fontFamilyId || "madrasa");
   const [font, setFont] = useState(getFontFamilyById(savedPrefs.fontFamilyId));
-  const [mode, setMode] = useState<"rsvp" | "scroll" | "static" | "disappearing">(savedPrefs.mode || "static");
+  const [mode, setMode] = useState<"rsvp" | "scroll" | "static" | "disappearing" | "flash">(savedPrefs.mode || "static");
   const [speed, setSpeed] = useState(savedPrefs.speed || 150);
   const [grade, setGrade] = useState<string | null>(profile?.grade || "1");
   const [semester, setSemester] = useState<string>("الفصل الدراسي الأول");
@@ -485,11 +485,12 @@ export default function Dashboard() {
                 {/* 3. شكل القراءة */}
                 <div className="space-y-1.5">
                   <span className="text-xs font-black text-gray-700 block">شكل القراءة المفضل:</span>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                     {[
                       { id: "static", icon: BookOpen, label: "📄 نص كامل", desc: "كامل الشاشة" },
                       { id: "scroll", icon: Scroll, label: "📜 انسيابي", desc: "صعود للأعلى" },
-                      { id: "rsvp", icon: Zap, label: "⚡ كلمة بكلمة", desc: "وميض" },
+                      { id: "rsvp", icon: Zap, label: "⚡ كلمة بكلمة", desc: "تتابع" },
+                      { id: "flash", icon: Eye, label: "💡 وميض سريع", desc: "نظام الوميض" },
                       { id: "disappearing", icon: Sparkles, label: "✨ ظهور واختفاء", desc: "تتابع واختفاء" }
                     ].map(m => (
                       <button 

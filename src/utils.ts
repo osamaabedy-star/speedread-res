@@ -132,7 +132,7 @@ export interface ReaderPreferences {
   fontFamilyId: "madrasa" | "naskh" | "cairo" | "amiri" | "ruqaa";
   lineHeight: number; // e.g. 2.0
   speed: number; // e.g. 150
-  mode: "static" | "scroll" | "rsvp" | "disappearing";
+  mode: "static" | "scroll" | "rsvp" | "disappearing" | "flash";
 }
 
 export const ARABIC_FONTS = [

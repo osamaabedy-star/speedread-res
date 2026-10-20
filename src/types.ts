@@ -110,7 +110,7 @@ export interface QuizQuestion {
 export interface ReaderConfig {
   lessonId: string;
   speed: number;
-  mode: "rsvp" | "scroll" | "static" | "disappearing";
+  mode: "rsvp" | "scroll" | "static" | "disappearing" | "flash";
   font: string;
   fontFamilyId?: "naskh" | "madrasa" | "cairo" | "amiri" | "ruqaa";
   theme: string;
