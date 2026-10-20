@@ -24,7 +24,10 @@ import {
   X,
   Award,
   Star,
-  Eye
+  Eye,
+  Plus,
+  Minus,
+  Sliders
 } from "lucide-react";
 import { collection, onSnapshot, getDocs, query, where, doc, updateDoc, orderBy, limit } from "firebase/firestore";
 import { db } from "./firebase";
@@ -112,8 +115,11 @@ export default function TeacherDashboard() {
   const [teacherReadingMode, setTeacherReadingMode] = useState<"static" | "scroll" | "rsvp" | "disappearing" | "flash">(() => {
     return initialTeacherPrefs.mode || "static";
   });
+  const [teacherSpeed, setTeacherSpeed] = useState<number>(() => {
+    return initialTeacherPrefs.speed || 150;
+  });
 
-  // Modal to choose reading mode, font and speed before launching Reader
+  // Modal to choose reading mode, font and speed before launching Reader (optional advanced)
   const [lessonForReadingModal, setLessonForReadingModal] = useState<Lesson | null>(null);
   const [readingModeDraft, setReadingModeDraft] = useState<"static" | "scroll" | "rsvp" | "disappearing" | "flash">(initialTeacherPrefs.mode || "static");
   const [readingSpeedDraft, setReadingSpeedDraft] = useState<number>(initialTeacherPrefs.speed || 150);
@@ -547,22 +553,20 @@ export default function TeacherDashboard() {
       return;
     }
 
-    if (!modeOverride) {
-      handleOpenReadingModal(lesson);
-      return;
-    }
-
     const currentPrefs = getSavedReaderPreferences();
-    const mode = modeOverride;
+    const mode = modeOverride || teacherReadingMode || currentPrefs.mode || "flash";
+    const speedToUse = teacherSpeed || currentPrefs.speed || 150;
+    const fontToUse = currentPrefs.fontFamilyId || "madrasa";
+    const fontSizeToUse = currentPrefs.fontSize || 36;
 
     const config: ReaderConfig = {
       lessonId: lesson.id,
-      speed: currentPrefs.speed || 150,
+      speed: speedToUse,
       mode: mode,
-      font: getFontFamilyById(currentPrefs.fontFamilyId),
-      fontFamilyId: currentPrefs.fontFamilyId,
+      font: getFontFamilyById(fontToUse),
+      fontFamilyId: fontToUse,
       theme: "light",
-      fontSize: currentPrefs.fontSize || 36,
+      fontSize: fontSizeToUse,
       teacherMode: true,
       targetStudentId: selectedStudent.uid || selectedStudent.nationalId,
       targetStudentName: selectedStudent.fullName || selectedStudent.username
@@ -1169,54 +1173,116 @@ export default function TeacherDashboard() {
             </div>
           </div>
 
-          {/* سطر معلومات سريع عن النصوص وشكل القراءة المعتمد */}
-          <div className="flex items-center justify-between flex-wrap gap-2 bg-gray-50/80 p-2 rounded-2xl border border-gray-100 text-xs font-bold">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-gray-500 text-[11px] font-black">شكل القراءة:</span>
-              <div className="flex items-center bg-white p-0.5 rounded-xl border border-gray-200 shadow-2xs gap-0.5">
-                <button
-                  onClick={() => { setTeacherReadingMode("static"); sessionStorage.setItem("teacher_reading_mode", "static"); }}
-                  className={cn(
-                    "px-2.5 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer",
-                    teacherReadingMode === "static" ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs" : "text-gray-500 hover:text-gray-800"
-                  )}
-                  title="نص كامل ثابت"
-                >
-                  <BookOpen size={12} />
-                  <span>📄 نص كامل</span>
-                </button>
+          {/* سطر معلومات سريع عن النصوص وشكل القراءة المعتمد وسرعة القراءة */}
+          <div className="flex items-center justify-between flex-wrap gap-2.5 bg-gray-50/90 p-2.5 rounded-2xl border border-gray-100 text-xs font-bold shadow-2xs">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* اختيار شكل القراءة المعتمد */}
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-[11px] font-black">شكل القراءة:</span>
+                <div className="flex items-center bg-white p-0.5 rounded-xl border border-gray-200 shadow-2xs gap-0.5">
+                  <button
+                    onClick={() => { setTeacherReadingMode("flash"); sessionStorage.setItem("teacher_reading_mode", "flash"); }}
+                    className={cn(
+                      "px-2 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer",
+                      teacherReadingMode === "flash" ? "bg-amber-600 text-white shadow-2xs" : "text-gray-600 hover:text-gray-900"
+                    )}
+                    title="💡 نظام الوميض القرائي السريع"
+                  >
+                    <Eye size={12} />
+                    <span>💡 وميض سريع</span>
+                  </button>
 
-                <button
-                  onClick={() => { setTeacherReadingMode("scroll"); sessionStorage.setItem("teacher_reading_mode", "scroll"); }}
-                  className={cn(
-                    "px-2.5 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer",
-                    teacherReadingMode === "scroll" ? "bg-blue-600 text-white shadow-2xs" : "text-gray-500 hover:text-gray-800"
-                  )}
-                  title="التمرير الانسيابي كالملقن"
-                >
-                  <ArrowUpDown size={12} />
-                  <span>📜 تمرير انسيابي</span>
-                </button>
+                  <button
+                    onClick={() => { setTeacherReadingMode("rsvp"); sessionStorage.setItem("teacher_reading_mode", "rsvp"); }}
+                    className={cn(
+                      "px-2 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer",
+                      teacherReadingMode === "rsvp" ? "bg-amber-500 text-white shadow-2xs" : "text-gray-600 hover:text-gray-900"
+                    )}
+                    title="قراءة كلمة كلمة متتابعة"
+                  >
+                    <Zap size={12} />
+                    <span>⚡ كلمة كلمة</span>
+                  </button>
 
+                  <button
+                    onClick={() => { setTeacherReadingMode("disappearing"); sessionStorage.setItem("teacher_reading_mode", "disappearing"); }}
+                    className={cn(
+                      "px-2 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer",
+                      teacherReadingMode === "disappearing" ? "bg-purple-600 text-white shadow-2xs" : "text-gray-600 hover:text-gray-900"
+                    )}
+                    title="ظهور واختفاء الكلمات"
+                  >
+                    <Sparkles size={12} />
+                    <span>✨ ظهور واختفاء</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setTeacherReadingMode("scroll"); sessionStorage.setItem("teacher_reading_mode", "scroll"); }}
+                    className={cn(
+                      "px-2 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer",
+                      teacherReadingMode === "scroll" ? "bg-blue-600 text-white shadow-2xs" : "text-gray-600 hover:text-gray-900"
+                    )}
+                    title="التمرير الانسيابي كالملقن"
+                  >
+                    <ArrowUpDown size={12} />
+                    <span>📜 تمرير انسيابي</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setTeacherReadingMode("static"); sessionStorage.setItem("teacher_reading_mode", "static"); }}
+                    className={cn(
+                      "px-2 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer",
+                      teacherReadingMode === "static" ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs" : "text-gray-600 hover:text-gray-900"
+                    )}
+                    title="نص كامل ثابت"
+                  >
+                    <BookOpen size={12} />
+                    <span>📄 نص كامل</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* ضبط السرعة السريع والمباشر دون تعقيد */}
+              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-gray-200 shadow-2xs">
+                <span className="text-[11px] font-black text-gray-500 mr-1 flex items-center gap-1">
+                  <Zap size={12} className="text-amber-500" />
+                  <span>السرعة:</span>
+                </span>
                 <button
-                  onClick={() => { setTeacherReadingMode("rsvp"); sessionStorage.setItem("teacher_reading_mode", "rsvp"); }}
-                  className={cn(
-                    "px-2.5 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer",
-                    teacherReadingMode === "rsvp" ? "bg-amber-500 text-white shadow-2xs" : "text-gray-500 hover:text-gray-800"
-                  )}
-                  title="وميض كلمة كلمة"
+                  type="button"
+                  onClick={() => {
+                    const next = Math.max(30, teacherSpeed - 15);
+                    setTeacherSpeed(next);
+                    saveReaderPreferences({ speed: next });
+                  }}
+                  className="w-5 h-5 bg-gray-100 hover:bg-gray-200 active:scale-90 text-gray-700 rounded-md flex items-center justify-center cursor-pointer text-xs font-black"
+                  title="إنقاص السرعة (-15 ك/د)"
                 >
-                  <Zap size={12} />
-                  <span>⚡ كلمة كلمة</span>
+                  <Minus size={11} />
+                </button>
+                <span className="text-xs font-black text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 min-w-[50px] text-center tabular-nums">
+                  {toIndianNumbers(teacherSpeed)} ك/د
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = Math.min(450, teacherSpeed + 15);
+                    setTeacherSpeed(next);
+                    saveReaderPreferences({ speed: next });
+                  }}
+                  className="w-5 h-5 bg-gray-100 hover:bg-gray-200 active:scale-90 text-gray-700 rounded-md flex items-center justify-center cursor-pointer text-xs font-black"
+                  title="زيادة السرعة (+15 ك/د)"
+                >
+                  <Plus size={11} />
                 </button>
               </div>
             </div>
 
-            <div className="text-[11px] text-gray-400 font-bold flex items-center gap-2">
+            <div className="text-[11px] text-gray-500 font-bold flex items-center gap-2">
               <span>{toIndianNumbers(filteredLessons.length)} نص متاح</span>
               {selectedStudent && (
                 <span className="text-emerald-700 font-black">
-                  • الطالب: {selectedStudent.fullName || selectedStudent.username}
+                  • الطالب المحدد: {selectedStudent.fullName || selectedStudent.username}
                 </span>
               )}
             </div>
@@ -1301,22 +1367,31 @@ export default function TeacherDashboard() {
 
                     {/* أزرار الإجراءات للدرس: اقرأ | الأسئلة | السبورة */}
                     <div className="grid grid-cols-3 gap-1.5 pt-1">
-                      {/* زر بدء القراءة بالشكل المحدد */}
-                      <button
-                        onClick={() => handleStartSession(lesson)}
-                        className={cn(
-                          "py-2 px-1 rounded-xl font-black text-[11px] transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer",
-                          selectedStudent 
-                            ? "bg-blue-600 text-white hover:bg-blue-700 active:scale-95" 
-                            : "bg-gray-100 text-gray-400 hover:bg-gray-200"
-                        )}
-                        title={selectedStudent ? `ابدأ القراءة مع ${selectedStudent.fullName?.split(" ")[0]} (${teacherReadingMode === "scroll" ? "تمرير انسيابي" : teacherReadingMode === "rsvp" ? "كلمة كلمة" : "نص كامل"})` : "اختر طالباً أولاً"}
-                      >
-                        <PlayCircle size={13} />
-                        <span className="truncate">
-                          اقرأ ({teacherReadingMode === "scroll" ? "انسيابي" : teacherReadingMode === "rsvp" ? "كلمة" : "كامل"})
-                        </span>
-                      </button>
+                      {/* زر بدء القراءة المباشر */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleStartSession(lesson)}
+                          className={cn(
+                            "flex-1 py-2 px-1 rounded-xl font-black text-[11px] transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer",
+                            selectedStudent 
+                              ? "bg-blue-600 text-white hover:bg-blue-700 active:scale-95" 
+                              : "bg-gray-100 text-gray-400 hover:bg-gray-200"
+                          )}
+                          title={selectedStudent ? `بدء القراءة فوراً مع ${selectedStudent.fullName?.split(" ")[0]} بسرعة ${toIndianNumbers(teacherSpeed)} ك/د` : "اختر طالباً أولاً"}
+                        >
+                          <PlayCircle size={13} />
+                          <span className="truncate">
+                            اقرأ ({teacherReadingMode === "flash" ? "وميض" : teacherReadingMode === "rsvp" ? "كلمة" : teacherReadingMode === "disappearing" ? "تتابع" : teacherReadingMode === "scroll" ? "انسيابي" : "كامل"})
+                          </span>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpenReadingModal(lesson); }}
+                          className="p-1.5 rounded-xl border border-gray-200 text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-all cursor-pointer"
+                          title="خيارات وتخصيص متقدم لهذا الدرس"
+                        >
+                          <Sliders size={12} />
+                        </button>
+                      </div>
 
                       {/* زر حل أسئلة الفهم للدرس نفسه */}
                       <button
@@ -1353,242 +1428,167 @@ export default function TeacherDashboard() {
 
       </div>
 
-      {/* نافذة اختيار شكل القراءة وسرعتها قبل الدخول للدرس */}
+      {/* نافذة إعدادات القراءة المختصرة والمصغرة */}
       <AnimatePresence>
         {lessonForReadingModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[200] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-2xs z-[200] flex items-center justify-center p-3">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-5 text-right font-tajawal"
+              className="bg-white rounded-2xl max-w-sm w-full p-4 shadow-2xl border border-gray-100 space-y-3 text-right font-tajawal animate-in fade-in"
             >
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-                <div className="flex items-center gap-2 text-blue-600">
-                  <PlayCircle size={22} />
-                  <div>
-                    <h3 className="text-base font-black text-gray-900">اختيار شكل القراءة والسرعة</h3>
-                    <p className="text-[11px] text-gray-400 font-bold">قبل الدخول إلى الدرس مع الطالب</p>
-                  </div>
+              {/* الرأس المصغر */}
+              <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                <div className="flex items-center gap-1.5 text-blue-600">
+                  <Sliders size={17} />
+                  <span className="text-sm font-black text-gray-900">إعدادات القراءة</span>
                 </div>
-                <button 
-                  onClick={() => setLessonForReadingModal(null)}
-                  className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* تفاصيل الدرس والطالب */}
-              <div className="bg-blue-50/60 p-3 rounded-2xl border border-blue-100 text-xs space-y-1">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-500 font-bold">الدرس:</span>
-                  <span className="font-black text-blue-900">{lessonForReadingModal.title}</span>
-                </div>
-                {selectedStudent && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 font-bold">الطالب المحدد:</span>
-                    <span className="font-black text-emerald-800">{selectedStudent.fullName || selectedStudent.username}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* اختيار شكل القراءة */}
-              <div className="space-y-2">
-                <label className="block text-xs font-black text-gray-800">اختر شكل القراءة المطلوب:</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setReadingModeDraft("static")}
-                    className={cn(
-                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
-                      readingModeDraft === "static"
-                        ? "bg-blue-50 border-blue-500 text-blue-700 shadow-xs ring-2 ring-blue-500/20 font-black"
-                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
-                    )}
-                  >
-                    <BookOpen size={18} className={readingModeDraft === "static" ? "text-blue-600" : "text-gray-400"} />
-                    <span className="text-xs">📄 نص كامل</span>
-                    <span className="text-[9px] text-gray-400">قراءة تقليدية</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setReadingModeDraft("scroll")}
-                    className={cn(
-                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
-                      readingModeDraft === "scroll"
-                        ? "bg-blue-600 border-blue-600 text-white shadow-xs ring-2 ring-blue-600/20 font-black"
-                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
-                    )}
-                  >
-                    <ArrowUpDown size={18} className={readingModeDraft === "scroll" ? "text-white" : "text-gray-400"} />
-                    <span className="text-xs">📜 انسيابي</span>
-                    <span className={cn("text-[9px]", readingModeDraft === "scroll" ? "text-blue-100" : "text-gray-400")}>
-                      يصعد للأعلى
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setReadingModeDraft("rsvp")}
-                    className={cn(
-                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
-                      readingModeDraft === "rsvp"
-                        ? "bg-amber-500 border-amber-500 text-white shadow-xs ring-2 ring-amber-500/20 font-black"
-                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
-                    )}
-                  >
-                    <Zap size={18} className={readingModeDraft === "rsvp" ? "text-white" : "text-gray-400"} />
-                    <span className="text-xs">⚡ كلمة كلمة</span>
-                    <span className={cn("text-[9px]", readingModeDraft === "rsvp" ? "text-amber-100" : "text-gray-400")}>
-                      تتابع مركزي
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setReadingModeDraft("flash")}
-                    className={cn(
-                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
-                      readingModeDraft === "flash"
-                        ? "bg-amber-600 border-amber-600 text-white shadow-xs ring-2 ring-amber-500/20 font-black"
-                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
-                    )}
-                  >
-                    <Eye size={18} className={readingModeDraft === "flash" ? "text-white" : "text-gray-400"} />
-                    <span className="text-xs">💡 وميض سريع</span>
-                    <span className={cn("text-[9px]", readingModeDraft === "flash" ? "text-amber-100" : "text-gray-400")}>
-                      نظام الوميض
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setReadingModeDraft("disappearing")}
-                    className={cn(
-                      "p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
-                      readingModeDraft === "disappearing"
-                        ? "bg-purple-600 border-purple-600 text-white shadow-xs ring-2 ring-purple-500/20 font-black"
-                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
-                    )}
-                  >
-                    <Sparkles size={18} className={readingModeDraft === "disappearing" ? "text-white" : "text-gray-400"} />
-                    <span className="text-xs">✨ ظهور واختفاء</span>
-                    <span className={cn("text-[9px]", readingModeDraft === "disappearing" ? "text-purple-100" : "text-gray-400")}>
-                      تظهر وتختفي
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* اختيار نوع الخط العربي الافتراضي */}
-              <div className="space-y-1.5 pt-1">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-black text-gray-800">نوع الخط الافتراضي:</label>
-                  <span className="text-xs font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
-                    {ARABIC_FONTS.find(f => f.id === readingFontDraft)?.label || "مدرسي"}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black text-blue-800 bg-blue-50 px-2 py-0.5 rounded-lg truncate max-w-[150px]">
+                    {lessonForReadingModal.title}
                   </span>
-                </div>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {ARABIC_FONTS.map(font => {
-                    const isSelected = readingFontDraft === font.id;
-                    return (
-                      <button
-                        type="button"
-                        key={font.id}
-                        onClick={() => setReadingFontDraft(font.id as any)}
-                        className={cn(
-                          "py-2 px-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5",
-                          isSelected
-                            ? "bg-blue-600 text-white border-blue-600 shadow-2xs font-black"
-                            : "bg-gray-50 hover:bg-gray-100 text-gray-700 border-gray-200 font-bold"
-                        )}
-                      >
-                        <span className="text-[11px]">{font.label}</span>
-                        <span 
-                          style={{ fontFamily: font.family }} 
-                          className={cn("text-[10px] truncate max-w-full", isSelected ? "text-white" : "text-gray-400")}
-                        >
-                          أبجد
-                        </span>
-                      </button>
-                    );
-                  })}
+                  <button 
+                    onClick={() => setLessonForReadingModal(null)}
+                    className="p-1 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 cursor-pointer"
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
               </div>
 
-              {/* حجم الخط وسرعة القراءة */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                {/* حجم الخط */}
-                <div className="space-y-1.5 bg-gray-50 p-2.5 rounded-2xl border border-gray-100">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-black text-gray-700">حجم الخط:</span>
-                    <span className="font-black text-blue-700">{toIndianNumbers(readingFontSizeDraft)} نقطة</span>
-                  </div>
+              {/* 1. شكل القراءة (5 خيارات مصغرة وواضحة) */}
+              <div className="space-y-1">
+                <span className="text-[11px] font-black text-gray-700 block">شكل القراءة:</span>
+                <div className="grid grid-cols-5 gap-1">
+                  {[
+                    { id: "static", label: "كامل", icon: BookOpen },
+                    { id: "scroll", label: "تمرير", icon: ArrowUpDown },
+                    { id: "rsvp", label: "كلمة", icon: Zap },
+                    { id: "flash", label: "وميض", icon: Eye },
+                    { id: "disappearing", label: "تتابع", icon: Sparkles }
+                  ].map(m => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setReadingModeDraft(m.id as any)}
+                      className={cn(
+                        "py-2 px-1 rounded-xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer",
+                        readingModeDraft === m.id
+                          ? "bg-blue-600 border-blue-600 text-white font-black shadow-xs"
+                          : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 font-bold"
+                      )}
+                    >
+                      <m.icon size={15} />
+                      <span className="text-[10px]">{m.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. سرعة القراءة مع أزرار سريعة ومباشرة */}
+              <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-gray-700">سرعة القراءة:</span>
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setReadingFontSizeDraft(prev => Math.max(20, prev - 2))}
-                      className="flex-1 py-1 bg-white hover:bg-gray-200 rounded-lg text-xs font-black border border-gray-200 cursor-pointer"
+                      onClick={() => setReadingSpeedDraft(s => Math.max(30, s - 10))}
+                      className="w-6 h-6 rounded-lg bg-white border border-gray-200 text-gray-700 font-black flex items-center justify-center hover:bg-gray-100 cursor-pointer active:scale-95"
                     >
-                      - تصغير
+                      -
                     </button>
+                    <span className="font-black text-amber-700 tabular-nums px-1 text-xs">
+                      {toIndianNumbers(readingSpeedDraft)} ك/د
+                    </span>
                     <button
                       type="button"
-                      onClick={() => setReadingFontSizeDraft(prev => Math.min(64, prev + 2))}
-                      className="flex-1 py-1 bg-white hover:bg-gray-200 rounded-lg text-xs font-black border border-gray-200 cursor-pointer"
+                      onClick={() => setReadingSpeedDraft(s => Math.min(450, s + 10))}
+                      className="w-6 h-6 rounded-lg bg-white border border-gray-200 text-gray-700 font-black flex items-center justify-center hover:bg-gray-100 cursor-pointer active:scale-95"
                     >
-                      + تكبير
+                      +
                     </button>
                   </div>
                 </div>
 
-                {/* سرعة القراءة */}
-                <div className="space-y-1.5 bg-gray-50 p-2.5 rounded-2xl border border-gray-100">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-black text-gray-700">سرعة القراءة:</span>
-                    <span className="font-black text-amber-700">{toIndianNumbers(readingSpeedDraft)} ك/د</span>
-                  </div>
-                  <input 
-                    type="range"
-                    min="30"
-                    max="350"
-                    step="10"
-                    value={readingSpeedDraft}
-                    onChange={(e) => setReadingSpeedDraft(parseInt(e.target.value, 10))}
-                    className="w-full accent-amber-500 cursor-pointer"
-                  />
+                <div className="flex items-center justify-between gap-1 pt-0.5">
+                  {[90, 120, 150, 180, 220].map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setReadingSpeedDraft(s)}
+                      className={cn(
+                        "flex-1 py-1 rounded-lg text-[10px] font-black border transition-all cursor-pointer",
+                        readingSpeedDraft === s
+                          ? "bg-amber-500 text-white border-amber-500 shadow-2xs"
+                          : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                      )}
+                    >
+                      {toIndianNumbers(s)}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* خيار الحفظ كإعدادات افتراضية دائمة */}
-              <label className="flex items-center gap-2 p-2 bg-blue-50/60 rounded-xl border border-blue-100 cursor-pointer text-xs font-bold text-blue-900 select-none">
+              {/* 3. الخط وحجم الخط في سطر واحد مختصر */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="space-y-1">
+                  <span className="font-bold text-gray-700 block text-[11px]">نوع الخط:</span>
+                  <select
+                    value={readingFontDraft}
+                    onChange={(e) => setReadingFontDraft(e.target.value as any)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-1.5 px-2 text-xs font-bold text-gray-800 cursor-pointer"
+                  >
+                    {ARABIC_FONTS.map(f => (
+                      <option key={f.id} value={f.id}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="font-bold text-gray-700 block text-[11px]">حجم الخط:</span>
+                  <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl p-1">
+                    <button
+                      type="button"
+                      onClick={() => setReadingFontSizeDraft(prev => Math.max(20, prev - 2))}
+                      className="w-6 h-6 rounded-lg bg-white border border-gray-200 text-gray-700 font-black flex items-center justify-center hover:bg-gray-100 cursor-pointer active:scale-95"
+                    >
+                      -
+                    </button>
+                    <span className="font-black text-blue-700 text-xs tabular-nums">
+                      {toIndianNumbers(readingFontSizeDraft)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setReadingFontSizeDraft(prev => Math.min(64, prev + 2))}
+                      className="w-6 h-6 rounded-lg bg-white border border-gray-200 text-gray-700 font-black flex items-center justify-center hover:bg-gray-100 cursor-pointer active:scale-95"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. تثبيت كإعدادات دائمة */}
+              <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-gray-600 select-none pt-0.5">
                 <input 
                   type="checkbox"
                   checked={saveAsDefaultPrefs}
                   onChange={(e) => setSaveAsDefaultPrefs(e.target.checked)}
-                  className="rounded accent-blue-600 w-4 h-4 cursor-pointer"
+                  className="rounded accent-blue-600 w-3.5 h-3.5 cursor-pointer"
                 />
-                <span>تثبيت كإعدادات افتراضية دائمة للجلسات القادمة (لا تتغير إلا عند تعديلها)</span>
+                <span>تثبيت كإعدادات دائمة للجلسات القادمة</span>
               </label>
 
-              {/* أزرار الإجراء */}
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
-                <button
-                  type="button"
-                  onClick={() => setLessonForReadingModal(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-100 cursor-pointer"
-                >
-                  إلغاء
-                </button>
+              {/* 5. زر بدء القراءة */}
+              <div className="pt-1">
                 <button
                   type="button"
                   onClick={() => handleConfirmStartSession(readingModeDraft, readingSpeedDraft, readingFontDraft, readingFontSizeDraft, saveAsDefaultPrefs)}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md transition-all flex items-center gap-1.5 cursor-pointer hover:scale-105 active:scale-95"
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 hover:scale-[1.01]"
                 >
-                  <PlayCircle size={15} />
-                  <span>بدء القراءة الآن</span>
+                  <PlayCircle size={16} />
+                  <span>ابدأ القراءة الآن</span>
                 </button>
               </div>
             </motion.div>

@@ -465,74 +465,37 @@ export default function Reader() {
 
   const renderRSVP = () => {
     const word = words[currentIndex] || "";
-    const pivotIdx = Math.floor(word.length / 2);
-    const before = word.substring(0, pivotIdx);
-    const pivot = word[pivotIdx];
-    const after = word.substring(pivotIdx + 1);
     return (
       <div 
-        style={{ fontFamily: getFontFamilyById(fontFamilyId), fontSize: `${fontSize + 16}px` }} 
-        className="text-center font-black transition-all select-none"
+        style={{ fontFamily: getFontFamilyById(fontFamilyId), fontSize: `${fontSize + 32}px`, lineHeight }} 
+        className="text-center font-black select-none text-[var(--text)] tracking-wide flex items-center justify-center min-h-[200px] w-full"
       >
-        <span className="text-[var(--text)]">{before}</span>
-        <span className="text-amber-500 underline decoration-amber-400 decoration-4">{pivot}</span>
-        <span className="text-[var(--text)]">{after}</span>
+        <span>{word}</span>
       </div>
     );
   };
 
   const renderFlash = () => {
     const word = words[currentIndex] || "";
-    const pivotIdx = Math.floor(word.length / 2);
-    const before = word.substring(0, pivotIdx);
-    const pivot = word[pivotIdx];
-    const after = word.substring(pivotIdx + 1);
     const isError = errorWordIndices.includes(currentIndex);
 
     return (
-      <div className="w-full max-w-4xl px-4 flex flex-col items-center justify-center space-y-6 select-none animate-in fade-in zoom-in-95 duration-100">
-        <div className="flex items-center gap-3">
-          <div className="text-xs font-black text-amber-900 bg-amber-50 px-4 py-1.5 rounded-full border border-amber-300 flex items-center gap-2 shadow-xs">
-            <Zap size={15} className="text-amber-500 fill-amber-500 animate-pulse" />
-            <span>نظام الوميض القرائي • الكلمة {toIndianNumbers(currentIndex + 1)} من {toIndianNumbers(words.length)}</span>
-          </div>
-          <div className="text-xs font-black text-blue-900 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-200">
-            {toIndianNumbers(speed)} كلمة / دقيقة
-          </div>
-        </div>
-
-        {/* نقطة الارتكاز البصرية في المنتصف */}
-        <div className="flex items-center justify-center gap-3 text-gray-300">
-          <div className="w-16 h-0.5 bg-gradient-to-l from-amber-400 to-transparent rounded-full" />
-          <span className="w-4 h-4 rounded-full bg-amber-500 shadow-md animate-ping ring-4 ring-amber-300/40" />
-          <div className="w-16 h-0.5 bg-gradient-to-r from-amber-400 to-transparent rounded-full" />
-        </div>
-
-        {/* صندوق الوميض الضوئي المكبر */}
+      <div className="w-full flex items-center justify-center select-none">
         <div
           key={currentIndex}
           onClick={(e) => { e.stopPropagation(); toggleWordError(currentIndex); }}
           style={{ 
             fontFamily: getFontFamilyById(fontFamilyId), 
-            fontSize: `${fontSize + 28}px`, 
+            fontSize: `${fontSize + 36}px`, 
             lineHeight 
           }} 
           className={cn(
-            "text-center font-black transition-all cursor-pointer py-10 px-14 rounded-3xl min-h-[190px] flex items-center justify-center border-2 shadow-2xl animate-in zoom-in-95 duration-75",
-            isError
-              ? "bg-red-50 text-red-700 border-red-500 ring-8 ring-red-200"
-              : "bg-white text-gray-950 border-amber-300 ring-8 ring-amber-100/70"
+            "text-center font-black transition-all cursor-pointer select-none tracking-wide px-8 py-6 rounded-2xl",
+            isError ? "text-red-600 bg-red-50/80" : "text-gray-950 dark:text-white"
           )}
-          title="انقر على الكلمة لتسجيل خطأ عليها"
         >
-          <span>{before}</span>
-          <span className="text-amber-600 underline decoration-amber-400 decoration-4 mx-0.5">{pivot}</span>
-          <span>{after}</span>
+          <span>{word}</span>
         </div>
-
-        <p className="text-xs text-gray-400 font-bold text-center max-w-lg">
-          ثبّت نظرك على النقطة المركزية لامتصاص الكلمة بومضة واحدة دون حركة العين • انقر لتسجيل خطأ
-        </p>
       </div>
     );
   };
@@ -541,127 +504,59 @@ export default function Reader() {
 
   return (
     <div className="fixed inset-0 bg-[var(--bg)] text-[var(--text)] flex flex-col overflow-hidden select-none font-tajawal rtl" dir="rtl">
-      {/* 1. شريط علوي خفيف ونظيف لا يشغل حيزاً: عنوان الدرس + مؤشر النمط + مؤقت مصغر */}
-      <div className="bg-[var(--panel)]/90 backdrop-blur-md border-b border-[var(--border)] px-3 sm:px-6 py-2 flex items-center justify-between z-40 shrink-0">
-        <div className="flex items-center gap-2.5">
-          <button 
-            onClick={() => navigate(config?.teacherMode ? "/teacher" : "/")} 
-            className="p-1.5 hover:bg-gray-100 rounded-xl text-gray-500 hover:text-gray-900 transition-all cursor-pointer"
-            title="العودة"
-          >
-            <Home size={18} />
-          </button>
-          <div>
-            <h2 className="text-sm sm:text-base font-black text-[var(--primary)] leading-tight flex items-center gap-2">
-              <span>{lesson?.title}</span>
-              <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-black border border-blue-200">
-                {readingMode === "flash" ? "💡 وميض سريع" : readingMode === "scroll" ? "📜 تمرير انسيابي" : readingMode === "rsvp" ? "⚡ كلمة كلمة" : readingMode === "disappearing" ? "✨ ظهور واختفاء" : "📄 نص كامل"}
-              </span>
-            </h2>
-            {config?.targetStudentName && (
-              <span className="text-[11px] text-gray-500 font-bold">
-                الطالب: <strong className="text-blue-700">{config.targetStudentName}</strong>
-              </span>
-            )}
-          </div>
-          <div className={cn("bg-[var(--accent)] text-white px-2.5 py-0.5 rounded-full text-[11px] font-bold shadow-md transition-all duration-300 pointer-events-none flex items-center gap-1", showToast ? "opacity-100 scale-100" : "opacity-0 scale-90")}>
-            <CheckCircle size={13} />
-            <span>تم تسجيل خطأ</span>
-          </div>
+      {/* إشعار عائم ومصغر لتسجيل الخطأ دون حجب النص */}
+      {showToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white px-3.5 py-1 rounded-full text-xs font-black shadow-lg animate-in fade-in slide-in-from-top-2 flex items-center gap-1.5">
+          <CheckCircle size={13} />
+          <span>تم تسجيل خطأ</span>
         </div>
+      )}
 
-        {/* أزرار سريعة في أقصى اليسار: مؤقت مستمر + ملء الشاشة + خيارات */}
-        <div className="flex items-center gap-2">
-          {/* مؤشر الوقت المستمر لحساب السرعة الحقيقية */}
-          <div className="flex items-center gap-1.5 font-bold text-xs text-[var(--primary)] bg-primary/5 px-2.5 py-1 rounded-xl border border-primary/20" title="الوقت الفعلي المستغرق في القراءة">
-            <Clock size={13} /> 
-            <span className="tabular-nums font-mono">{formatTime(elapsedTime)}</span>
-          </div>
-
-          {/* زر ملء الشاشة لتكبير منطقة القراءة وإلغاء المشتتات */}
-          <button
-            onClick={toggleFullscreen}
-            className="p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-all cursor-pointer"
-            title={isFullscreen ? "تصغير الشاشة" : "ملء كامل الشاشة للقراءة"}
-          >
-            {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
-          </button>
-
-          {/* زر إظهار القائمة إذا كانت مخفية */}
-          {isDockHidden && (
-            <button
-              onClick={() => setIsDockHidden(false)}
-              className="p-1.5 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 rounded-xl transition-all cursor-pointer flex items-center gap-1 text-xs font-bold"
-              title="إظهار أزرار التحكم"
-            >
-              <Eye size={15} />
-              <span className="hidden sm:inline">أزرار التحكم</span>
-            </button>
-          )}
-
-          {/* زر فتح القائمة الجانبية للإعدادات الشاملة */}
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
-            title="فتح لوحة الإعدادات والخطوط الافتراضية"
-          >
-            <Sliders size={15} />
-            <span className="hidden sm:inline">الإعدادات</span>
-          </button>
-        </div>
-
-        {/* شريط التقدم السفلي */}
-        <div className="absolute bottom-0 left-0 w-full h-1 bg-[var(--border)]">
-          <div className="h-full bg-[var(--primary)] transition-all duration-100" style={{ width: `${(currentIndex / Math.max(1, words.length)) * 100}%` }}></div>
-        </div>
-      </div>
-
-      {/* Viewport: معظم الشاشة مخصص بالكامل للقراءة مكبّراً دون حجب */}
+      {/* منطقة القراءة النقية: الشاشة بالكامل مخصصة فقط للكلام المطلوب قراءته */}
       <div 
-        className="flex-1 relative flex items-center justify-center p-2 sm:p-6 overflow-hidden w-full h-[calc(100vh-3.2rem)]" 
+        className="flex-1 relative flex items-center justify-center p-4 sm:p-10 overflow-hidden w-full h-full" 
         onClick={() => (readingMode === "rsvp" || readingMode === "disappearing" || readingMode === "flash") && !finished && setIsPlaying(!isPlaying)}
       >
         {countdown !== null && (
-          <div className="absolute inset-0 flex items-center justify-center z-[100] bg-[var(--bg)]/70 backdrop-blur-xs">
-            <span className="text-9xl font-black text-[var(--primary)] animate-pulse">{countdown === 0 ? "انطلق!" : toIndianNumbers(countdown)}</span>
+          <div 
+            onClick={() => { setCountdown(null); startReading(); }} 
+            className="absolute inset-0 flex items-center justify-center z-[100] bg-[var(--bg)]/90 backdrop-blur-xs cursor-pointer select-none"
+          >
+            <span className="text-9xl font-black text-[var(--primary)] animate-pulse">
+              {countdown === 0 ? "انطلق!" : toIndianNumbers(countdown)}
+            </span>
           </div>
         )}
 
-        {/* النمط 1: نظام الوميض القرائي السريع */}
+        {/* النمط 1: وميض سريع */}
         {readingMode === "flash" && renderFlash()}
 
-        {/* النمط 2: كلمة كلمة (RSVP) */}
+        {/* النمط 2: كلمة بكلمة */}
         {readingMode === "rsvp" && (
-          <div className="w-full px-8 flex flex-col items-center justify-center space-y-6">
-            <div className="text-xs font-black text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
-              ⚡ قراءة كلمة كلمة • الكلمة {toIndianNumbers(currentIndex + 1)} من {toIndianNumbers(words.length)}
-            </div>
+          <div className="w-full max-w-4xl px-6 flex items-center justify-center">
             {renderRSVP()}
-            <p className="text-xs text-gray-400 font-bold">
-              اضغط على الشاشة للإيقاف أو المتابعة • اضغط "سجل خطأ" عند تعثر الطالب
-            </p>
           </div>
         )}
 
-        {/* النمط 3: التمرير الانسيابي (Teleprompter) */}
+        {/* النمط 3: التمرير الانسيابي */}
         {readingMode === "scroll" && (
-          <div className="relative w-full h-full overflow-hidden flex flex-col items-center justify-start pt-16">
+          <div className="relative w-full h-full overflow-hidden flex flex-col items-center justify-start pt-20">
             <div 
               ref={scrollRef} 
               style={{ 
                 fontFamily: getFontFamilyById(fontFamilyId), 
-                fontSize: `${fontSize}px`, 
-                lineHeight 
+                fontSize: `${fontSize + 6}px`, 
+                lineHeight: "2.6"
               }} 
-              className="w-full max-w-5xl px-8 text-center rtl whitespace-pre-line transition-transform will-change-transform"
+              className="w-full max-w-4xl px-6 text-center rtl whitespace-pre-line transition-transform will-change-transform select-none"
             >
               {words.map((w, i) => (
                 <span 
                   key={i} 
                   onClick={(e) => { e.stopPropagation(); toggleWordError(i); }} 
                   className={cn(
-                    "cursor-pointer hover:bg-blue-100/50 transition-colors mx-1 inline-block rounded", 
-                    errorWordIndices.includes(i) && "bg-red-100 border-b-2 border-red-500 text-red-700 font-black"
+                    "cursor-pointer mx-1.5 inline-block transition-colors", 
+                    errorWordIndices.includes(i) && "text-red-600 underline font-black"
                   )}
                 >
                   {w}
@@ -671,25 +566,18 @@ export default function Reader() {
           </div>
         )}
 
-        {/* النمط 4: نمط الظهور والاختفاء المتتابع (تظهر الكلمات بجانب بعض وتختفي) */}
+        {/* النمط 4: نمط الظهور والاختفاء */}
         {readingMode === "disappearing" && (
-          <div className="w-full max-w-5xl px-6 flex flex-col items-center justify-center space-y-6">
-            <div className="text-xs font-black text-purple-700 bg-purple-50 px-3.5 py-1 rounded-full border border-purple-200 flex items-center gap-1.5 shadow-2xs">
-              <Sparkles size={14} className="text-purple-600" />
-              <span>نمط الظهور والاختفاء • الكلمة {toIndianNumbers(currentIndex + 1)} من {toIndianNumbers(words.length)}</span>
-            </div>
-
-            {/* بطاقة الكلمات المتتابعة */}
+          <div className="w-full max-w-4xl px-6 flex items-center justify-center">
             <div 
               style={{ 
                 fontFamily: getFontFamilyById(fontFamilyId), 
-                fontSize: `${fontSize + 6}px`, 
-                lineHeight 
+                fontSize: `${fontSize + 8}px`, 
+                lineHeight: "2.2"
               }} 
-              className="text-center rtl font-black select-none min-h-[160px] flex items-center justify-center flex-wrap gap-x-5 gap-y-3.5 p-8 sm:p-12 bg-white/95 rounded-3xl border border-purple-100 shadow-xl max-w-4xl w-full"
+              className="text-center rtl font-black select-none min-h-[160px] flex items-center justify-center flex-wrap gap-x-5 gap-y-3 p-6"
             >
               {words.map((w, i) => {
-                // تظهر الكلمات بنافذة متحركة: الكلمة الحالية وقبلها بكلمتين، وتختفي الكلمات الأقدم
                 const isVisible = i <= currentIndex && i >= Math.max(0, currentIndex - 2);
                 if (!isVisible) return null;
 
@@ -701,12 +589,12 @@ export default function Reader() {
                     key={i}
                     onClick={(e) => { e.stopPropagation(); toggleWordError(i); }}
                     className={cn(
-                      "cursor-pointer px-4 py-2 rounded-2xl transition-all inline-block shadow-2xs",
+                      "cursor-pointer px-3 py-1.5 rounded-xl transition-all inline-block select-none",
                       isError
-                        ? "bg-red-100 text-red-700 border-2 border-red-500 scale-105"
+                        ? "text-red-600 underline font-black"
                         : isCurrent
-                          ? "bg-purple-600 text-white shadow-md scale-105 ring-4 ring-purple-300"
-                          : "bg-purple-50 text-purple-900 border border-purple-200 opacity-75"
+                          ? "text-blue-700 font-black scale-105"
+                          : "text-gray-400 opacity-60 font-bold"
                     )}
                   >
                     {w}
@@ -714,46 +602,31 @@ export default function Reader() {
                 );
               })}
             </div>
-
-            <p className="text-xs text-gray-400 font-bold">
-              تظهر الكلمات بجانب بعضها وتختفي لتدريب سرعة الانتقال البصري دون تراجع
-            </p>
           </div>
         )}
 
-        {/* النمط 5: نص كامل (Static) - معظم الشاشة مخصص بالكامل ومكبر للقراءة */}
+        {/* النمط 5: نص كامل نقي وواسع */}
         {readingMode === "static" && (
           <div 
-            className="w-full max-w-6xl h-full flex-1 overflow-y-auto bg-[var(--panel)] rounded-3xl p-6 sm:p-14 shadow-xl border border-[var(--border)] relative" 
+            className="w-full max-w-4xl h-full flex-1 overflow-y-auto p-6 sm:p-12 relative select-none scrollbar-thin text-justify rtl leading-loose" 
             style={{ 
               fontFamily: getFontFamilyById(fontFamilyId), 
               fontSize: `${fontSize}px`, 
-              lineHeight 
+              lineHeight: "2.4"
             }}
           >
-            <div className="sticky top-0 -mt-2 mb-6 pb-2.5 bg-[var(--panel)]/95 backdrop-blur-xs flex items-center justify-between text-xs font-bold text-gray-500 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <span>📄 قراءة كاملة للنص</span>
-                <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
-                  {words.length} كلمة
-                </span>
-              </div>
-              <span className="text-blue-600 font-bold">💡 انقر على أي كلمة يتعثر فيها الطالب لتسجيل خطأ</span>
-            </div>
-            <div className="text-justify rtl leading-loose">
-              {words.map((w, i) => (
-                <span 
-                  key={i} 
-                  onClick={() => toggleWordError(i)} 
-                  className={cn(
-                    "cursor-pointer hover:bg-blue-100 rounded px-1 transition-colors inline-block", 
-                    errorWordIndices.includes(i) && "bg-red-100 border-b-2 border-red-500 text-red-700 font-black scale-105"
-                  )}
-                >
-                  {w}{" "}
-                </span>
-              ))}
-            </div>
+            {words.map((w, i) => (
+              <span 
+                key={i} 
+                onClick={() => toggleWordError(i)} 
+                className={cn(
+                  "cursor-pointer hover:text-blue-600 transition-colors inline-block mx-0.5", 
+                  errorWordIndices.includes(i) && "text-red-600 underline font-black"
+                )}
+              >
+                {w}{" "}
+              </span>
+            ))}
           </div>
         )}
       </div>
@@ -785,6 +658,22 @@ export default function Reader() {
             </button>
           )}
 
+          {/* سهم سريع على الحافة المقابلة للتحويل بضغطة واحدة من أقصى الجهة الأخرى */}
+          {!isDockHidden && (
+            <button
+              onClick={toggleDockSide}
+              className={cn(
+                "fixed top-1/2 -translate-y-1/2 z-40 bg-white/80 hover:bg-blue-600 hover:text-white text-gray-500 p-2 shadow-md transition-all cursor-pointer hover:scale-110 active:scale-95 border border-gray-200/80 backdrop-blur-2xs",
+                dockSide === "right"
+                  ? "left-0 rounded-r-xl border-l-0"
+                  : "right-0 rounded-l-xl border-r-0"
+              )}
+              title={dockSide === "right" ? "نقل أزرار التحكم إلى أقصى اليسار هنا ⬅" : "نقل أزرار التحكم إلى أقصى اليمين هنا ➡"}
+            >
+              {dockSide === "right" ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
+          )}
+
           {/* القائمة العمودية الرئيسية */}
           {!isDockHidden && (
             <div 
@@ -793,19 +682,25 @@ export default function Reader() {
                 dockSide === "right" ? "right-2 sm:right-4" : "left-2 sm:left-4"
               )}
             >
-              {/* شريط رأس القائمة: زر التحويل للجهة الأخرى وزر الإخفاء */}
+              {/* شريط رأس القائمة: زر العودة، زر التحويل للجهة الأخرى، وزر الإخفاء */}
               <div className="flex items-center gap-1 w-full justify-between pb-1 border-b border-gray-100">
                 <button
+                  onClick={() => navigate(config?.teacherMode ? "/teacher" : "/")}
+                  className="p-1.5 hover:bg-gray-100 text-gray-500 hover:text-gray-900 rounded-lg transition-all cursor-pointer"
+                  title="العودة"
+                >
+                  <Home size={15} />
+                </button>
+                <button
                   onClick={toggleDockSide}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-blue-700 transition-all cursor-pointer"
+                  className="p-1.5 hover:bg-blue-50 text-blue-600 rounded-lg transition-all cursor-pointer flex items-center gap-0.5"
                   title={dockSide === "right" ? "تحويل القائمة إلى أقصى اليسار ⬅" : "تحويل القائمة إلى أقصى اليمين ➡"}
                 >
-                  <ArrowLeftRight size={15} />
+                  {dockSide === "right" ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
                 </button>
-                <span className="text-[10px] font-black text-gray-400">تحكم</span>
                 <button
                   onClick={() => setIsDockHidden(true)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-red-600 transition-all cursor-pointer"
+                  className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-600 transition-all cursor-pointer"
                   title="إخفاء القائمة لتفريغ كامل الشاشة للقراءة"
                 >
                   <EyeOff size={15} />
